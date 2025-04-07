@@ -1,0 +1,765 @@
+---
+title: "Stream Canopy Cover"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(DT, tidyverse, dplyr, purrr, htmlwidgets, lubridate, knitr, kableExtra, DT, plotly, betareg, car, moments, colorspace, update=F)
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+
+
+# Export Data
+## may move this elsewhere
+```
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Staff                 = "character",
+    Transect_Spacing_m    = "numeric",
+    Observer              = "character",
+    Transect_No.          = "factor",
+    Left_Bank             = "numeric",
+    Middle_Left           = "numeric",
+    Middle_Upstream       = "numeric",
+    Middle_Downstream     = "numeric",
+    Middle_Right          = "numeric",
+    Right_Bank            = "numeric",
+    Comments              = "character"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+   # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      } else if (expected_type == "factor") {
+        df[[col]] <- as.factor(df[[col]])
+      }
+    }
+  }
+  
+  return(df)
+}
+```
+
+Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
+
+You should be approaching data analysis with a set of established hypotheses, predictions, and plans for the various outcomes. If you are not familiar with the importance of *a priori* hypotheses and the dangers of data dredging, please spend some time reading up on these. Only once you have your hypotheses and predictions in mind (and ideally on paper) should you continue. We recommend revisiting your predictions and interpretations of possible outcomes before you run every single statistical test.
+
+# Guidance Format
+
+We have written these data analysis scripts in R markdown (.rmd files) and printed them as .html documents. As **Step 1** we recommend that you read through the .html files, which we printed using some example data. The .html files contain all the written guidance, but omit most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+```{r Set File Export Location, echo = FALSE}
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/StreamCanopy"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+# Data Wrangling
+
+The first step in analysing data is to ensure the data is correctly organised and cleaned for processing. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+First we will combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and/or one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Your canopy cover values collected with the spherical densiometer should range from 0 to 17, corresponding to the number of intersections across which cover was visible.
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "~/Git/Core Monitoring/standardised protocols/data_raw/Stream Canopy/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+It may be necessary to subset within this dataframe if, e.g., you included more than one channel in your .csv files (surveys of multiple side-channels, tribs etc.). These scripts are intended to analyse one focal channel per reach, to compare it over time and with independent reference reaches that also feature one channel each. The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways. 
+
+``` {r subset option}
+# df <- subset(df, Site %in% c("Hatchery Channel", "Brousseau Channel")) 
+
+# if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channels within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
+```
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we will isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to ymd, myd, dym, etc.):
+
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$year <- year(df$parsed_date)        # Extract the year
+```
+
+Let's take a look at the dataframe. 
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+Take a look through the dataframe and ensure there are no errors and to explore unusual entries. In some places, you may have missing entries or 'NA', when a value of '0' is more appropriate. If there was no cover visible in your densiometer, you should have a value of '0' because that is meaningful (no cover), whereas a missing value / NA is interpreted as no data at all. 
+
+Our code will automatically replace missing values in the densiometer data with 0, unless *all* values for a particular column (densiometer location/orientation) are missing for that site during that year. In that latter case, we assume that no readings were taken in that location/orientation. If they *were* taken, and happened to be all 0 value, then please go back to your raw data and update the relevant missing values to 0, and restart this script.
+
+```{r convert missing values, echo = FALSE}
+convert_na <- function(df, columns) {
+  df <- df %>%
+    group_by(Site, year) %>%  
+    mutate(across(
+      all_of(columns),
+      ~ if (all(is.na(.))) { 
+        .  # Keep the column as NA if all values are NA for that site-year (assume that orientation not assessed)
+      } else {
+        replace(., is.na(.), 0)  # Replace the NA values with 0 if at least one value per site year is entered (implies measurements were made)
+      }
+    )) %>%
+    ungroup()  
+  
+  return(df)
+}
+
+df <- convert_na(df, c("Left_Bank", "Middle_Left", "Middle_Right", "Middle_Upstream", "Middle_Downstream", "Right_Bank"))
+```
+# Stream Canopy Cover
+
+Now we can create some figures and summary metrics, and run inferential tests to aide interpretation of the effects of your restoration project on stream canopy cover.
+
+Your data were collected on a scale of 0 - 17, but we will convert this to percentage (0-100) to aide interpretation, and will produce a heatmap plot with a tile for each measurement taken.
+
+```{r percent and plot data, fig.width = 6, fig.height = 10,echo = FALSE}
+# Convert the raw values (0-17) to percentages (0-100)
+df <- df %>%
+  mutate(
+    Left_Bank_percent = (Left_Bank / 17) * 100,
+    Middle_Left_percent = (Middle_Left / 17) * 100,
+    Middle_Right_percent = (Middle_Right / 17) * 100,
+    Middle_Upstream_percent = (Middle_Upstream / 17) * 100,
+    Middle_Downstream_percent = (Middle_Downstream / 17) * 100,
+    Right_Bank_percent = (Right_Bank / 17) * 100
+  )
+
+# Convert Transect_No. to numeric temporarily to find max value
+max_transect_no <- max(as.numeric(as.character(df$Transect_No.)), na.rm = TRUE)
+# Convert Transect_No. back to a factor with full range for consistent y-axis
+df <- df %>%
+  mutate(Transect_No. = factor(Transect_No., levels = as.character(seq(1, max_transect_no, 1))))
+
+# Reshape the data to long format (positons of stream measurements as rows instead of cols; to put them on x axis of plot)
+df_long <- df %>%
+  pivot_longer(cols = c(Left_Bank_percent, Middle_Left_percent, Middle_Upstream_percent, 
+                        Middle_Downstream_percent, Middle_Right_percent, Right_Bank_percent),
+               names_to = "Position",
+               values_to = "Percent_Cover")
+
+# Define custom order and labels for x-axis
+position_levels <- c("Left_Bank_percent", "Middle_Left_percent", "Middle_Upstream_percent",
+                     "Middle_Downstream_percent", "Middle_Right_percent", "Right_Bank_percent")
+position_labels <- c("Left Bank", "Middle Left", "Middle Up", "Middle Down", "Middle Right", "Right Bank")
+
+# Ensure Position is an ordered factor for proper x-axis order
+df_long <- df_long %>%
+  mutate(Position = factor(Position, levels = position_levels))
+
+# Define BuGn colors
+gn_colors <- rev(sequential_hcl(7, palette = "Greens"))
+
+# Create the heatmap with BuGn colors
+heatmap_plot <- ggplot(df_long, aes(x = Position, y = Transect_No., fill = Percent_Cover)) +
+  geom_tile(color = "white", width = 1, height = 1) +  # Adjust tile size: taller and thinner
+  scale_fill_gradientn(colors = gn_colors,  
+                       values = scales::rescale(c(0, 0.25, 0.5, 0.75, 1)), 
+                       name = "Canopy %", na.value = "grey90") +  
+  scale_x_discrete(labels = position_labels) +  # Custom x-axis labels
+  scale_y_discrete(expand = expansion(mult = c(0, 0))) +  # Prevent extra spacing in y-axis
+  labs(x = "Stream Position", y = "Transect Number", title = "Stream Canopy Cover by \nSpherical Densiometer Measure") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),  # Rotate x-axis labels 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 1),  # Add border around each plot
+        strip.background = element_blank(),  
+        strip.text = element_text(face = "bold")) +
+  facet_wrap(~ Site + year, scales = "fixed") +  # Ensure consistent y-axis across facets
+  coord_fixed(ratio = 2)  # Maintain aspect ratio for tall & thin rectangles
+
+
+# Export teh figure
+export_plot(heatmap_plot, "Stream Canopy Cover Heatmap.pdf")
+
+# Print the heatmap
+print(heatmap_plot)
+```
+
+Because vegetation is often patchy, unless there are drastic differences among sites/years, no clear pattern may be discernible in the above figure. We will also look at summary metrics to compare the sites and/or years. We generate the mean and standard deviation for:
+
+a. The mid-channel readings (all four orientations combined);
+b. The floodplain/riparian readings (left and right bank combined);
+c. Left bank only; and
+d. Right bank only.
+
+Typically, the mid-channel readings (a) are taken together to be the best representation of stream canopy cover, as these readings are less sensitive to variations in flow. We include the various bank categories (b) - (d) in case these are of particular interest to your project (e.g., floodplain reconnection, undercut banks, wider channels).
+
+
+```{r summary stats, echo = FALSE}
+# Calculate the mean and sd for the grouped variables (Midchannel, Banks, LB, RB)
+summary_df <- df %>%
+  group_by(Site, year) %>%
+  summarise(
+    Midchannel_mean = mean(c(Middle_Left_percent, Middle_Right_percent, Middle_Upstream_percent, Middle_Downstream_percent), na.rm = TRUE),
+    Midchannel_sd = sd(c(Middle_Left_percent, Middle_Right_percent, Middle_Upstream_percent, Middle_Downstream_percent), na.rm = TRUE),
+    
+    Banks_mean = mean(c(Left_Bank_percent, Right_Bank_percent), na.rm = TRUE),
+    Banks_sd = sd(c(Left_Bank_percent, Right_Bank_percent), na.rm = TRUE),
+    
+    LB_mean = mean(Left_Bank_percent, na.rm = TRUE),
+    LB_sd = sd(Left_Bank_percent, na.rm = TRUE),
+    
+    RB_mean = mean(Right_Bank_percent, na.rm = TRUE),
+    RB_sd = sd(Right_Bank_percent, na.rm = TRUE),
+    .groups = "drop"  
+  ) %>%
+  ungroup()
+
+# Create the summary dataframe
+summary_table <- summary_df %>%
+  select(Site, year, Midchannel_mean, Midchannel_sd, Banks_mean, Banks_sd, LB_mean, LB_sd, RB_mean, RB_sd)
+
+# Define a named vector for column name replacements
+col_name_map <- c(
+  "Midchannel_mean" = "(a) Midchannel Mean",
+  "Midchannel_sd" = "(a) Midchannel SD",
+  "Banks_mean" = "(b) Banks Mean",
+  "Banks_sd" = "(b) Banks SD",
+  "LB_mean" = "(c) LB Mean",
+  "LB_sd" = "(c) LB SD",
+  "RB_mean" = "(d) RB Mean",
+  "RB_sd" = "(d) RB SD"
+)
+
+# Update column names using the map
+colnames(summary_table) <- ifelse(colnames(summary_table) %in% names(col_name_map),
+                                  col_name_map[colnames(summary_table)],
+                                  colnames(summary_table))
+
+# Create datatable
+datatable(summary_table, 
+          options = list(pageLength = 5, 
+                         autoWidth = TRUE, 
+                         scrollX = TRUE, 
+                         searchHighlight = TRUE, 
+                         columnDefs = list(
+                           list(targets = c(1, 2), visible = TRUE),  # Define visible columns
+                           list(targets = 0, visible = FALSE)  # Hide the row number column
+                         ))) %>%
+  formatRound(c("(a) Midchannel Mean", "(a) Midchannel SD", "(b) Banks Mean", "(b) Banks SD", "(c) LB Mean", "(c) LB SD", "(d) RB Mean", "(d) RB SD"), digits = 2)  # Round numeric columns
+
+# Save the data frame to CSV
+export_table(summary_table, "Stream Canopy Summary Metrics.csv")
+```
+
+# Inferential Statistics
+
+```{r df restructure, echo = FALSE}
+# here we restructure the data so that we can run inferential tests on the grouped categories of midchannel (4 variables combined) and banks (2 variables combined). 
+df_long_test <- df %>%
+  pivot_longer(cols = c(Left_Bank_percent, Right_Bank_percent, 
+                        Middle_Left_percent, Middle_Right_percent, 
+                        Middle_Upstream_percent, Middle_Downstream_percent),
+               names_to = "Position",
+               values_to = "Percent_Cover") %>%
+  mutate(Category = case_when(
+    Position %in% c("Middle_Left_percent", "Middle_Right_percent", "Middle_Upstream_percent", "Middle_Downstream_percent") ~ "Midchannel",
+    Position %in% c("Left_Bank_percent", "Right_Bank_percent") ~ "Banks"
+  ))
+```
+For our variables of midchannel (stream) cover and bank (riparian/floodplain) cover we now ask whether the differences in canopy cover among sites and/or across time are statistically significant. For understanding restoration success where you have a control or reference site, the focal question is usually whether the variables changed over time in different ways at the different sites, where the time period spans before and after your restoration actions. We will need to define the periods 'before' and 'after' restoration. 
+
+Enter your before and after years in the below code, you may have more than one year in each category. These categories should balance (equal number of years before as after), but they need not be consecutive years. If you do not have balanced data (e.g., only one year before project implementation, but three years after) be very cautious in running and interpreting statistical tests like ANOVA. You could select only a subset of your data to keep the comparison balanced, but if you do this for more than one set of dates you must account for the multiple comparisons inflating the likelihood of a Type I error (false positive).
+
+If you missed a particular measurement orientation for a site in any year, that orientation will be omitted from the statistical test entirely to prevent unbalanced comparisons (e.g., to avoid comparing both banks at site A to only the right bank at site B, or one year of data to two). Note that our two focal variables will still be tested as long as each has at least one valid orientation (e.g. banks might mean 'left bank only' if you omitted measuring right bank in one of your years).
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+
+```{r categorise by before after, echo = FALSE}
+# Categorize years
+df_long_test <- df_long_test %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+
+# Identify Positions (orientiations) that have all NA for any single year within any site
+invalid_positions <- df_long_test %>%
+  group_by(Site, year, Position) %>%
+  summarise(all_na = all(is.na(Percent_Cover)), .groups = "drop") %>%
+  filter(all_na) %>%  # only the ones that are fully NA in at least one year
+  pull(Position)  # Extract invalid Positions
+
+#  Remove invalid Positions from the dataset
+df_long_test <- df_long_test %>%
+  filter(!Position %in% invalid_positions)
+
+# Identify valid Site-Category pairs where both "Before" and "After" exist
+valid_site_category <- df_long_test %>%
+  group_by(Site, Category) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  select(Site, Category) %>%
+  distinct()
+
+# Keep only valid Site-Category pairs
+df_long_test <- df_long_test %>%
+  semi_join(valid_site_category, by = c("Site", "Category"))
+```
+
+### Assumption Robustness
+
+Now we have established the comparison groups, and the next step is to confirm that we are using the appropriate statistical test. You may have to transform your data or consider less common tests if the distribution of your data does not meet the assumptions of an ANOVA (chosen as default here due to its familiarity to many).
+
+We are interested in comparing the populations of canopy cover measurements for midchannel and banks categories among sites and years. Our field observations were bounded by 0 and 17, so there is certainly the potential for heavy-tailed distributions (non-normal due to relatively high frequencies of 0s or 17s), but this will be highly context-dependent. As such, we will examine the data and then provide options for statistical test.
+
+For our default of ANOVA, the assumptions are:
+
+- Data in different groups should be independent: 
+
+  - One of your sites must not cause changes in another (though both sites experiencing shared 'external' causal factors, such as being in the same watershed, is acceptable). This is hopefully accounted for by good selection of impact/control/reference sites. 
+  
+  - You may note that no site is actually independent from that same site in the past. For longer time-series we would need to adopt a different inferential approach to avoid autocorrelation, but here we are dealing with simple before vs after comparisons, and it is widely accepted that ANOVAs are suitable for before/after comparisons if the comparison is balanced (e.g., 2 years of before data compared with 2 years of after data).
+  
+- Residuals are normally distributed: We will examine this assumption using Q-Q plots and the Shapiro-Wilk normality test.
+
+- Homoscedasticity: Variance should be broadly equal across all groups. We will test this with Levene's test.
+
+If any of these assumptions are violated, we can transform the data and test whether the transformed data (log-, arcsine- etc.) satisfies the assumptions. If this is not an option, we should seek a more suitable statistical test. 
+
+Below we generate tests and figures that you should review to ensure your data are suitable for an ANOVA. In brief, look for the following:
+
+- Boxplots: consider whether outliers (dots) are real or errors
+- Q-Q plots: a reasonably straight line of points means alignment with normal distribution
+- Normality test (Shapiro-Wilk): p<0.05 indicates non-normality
+- Levene's test: p<0.05 indicates that variance among groups differs
+- Skewness values < 0 are left skewed, > 0 right skewed. Kurtosis values < 3 light-tailed, > 3 heavy-tailed.
+
+```{r normality assumptions etc, echo = FALSE}
+############################ Function to generate boxplots
+generate_boxplots <- function(df_long_test) {
+  ggplot(df_long_test, aes(x = interaction(Site, Time_Category), y = Percent_Cover)) +
+    geom_boxplot() +
+    labs(title = "Boxplot of Percent_Cover", x = "Site-Time Category", y = "Percent Cover") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    facet_wrap(~ Category)  # Separate Banks and Midchannel
+}
+
+# Generate and display boxplots
+boxplot_plot <- generate_boxplots(df_long_test)
+print(boxplot_plot)  # Look for outliers
+
+############################# Function to generate Q-Q plots
+generate_qqplots <- function(df_long_test) {
+  ggplot(df_long_test, aes(sample = Percent_Cover)) +  
+    stat_qq() +
+    stat_qq_line() +
+    labs(title = "Q-Q Plot of Percent_Cover") +
+    facet_wrap(~ interaction(Site, Time_Category, Category))  # Separate by site-time-category
+}
+
+# Generate and display Q-Q plots
+qqplot_plot <- generate_qqplots(df_long_test)
+print(qqplot_plot)  # Look for deviations from linearity
+
+############################# Function to test for normality 
+test_normality <- function(df_long_test) {
+  grouped_data <- split(df_long_test, list(df_long_test$Site, df_long_test$Time_Category, df_long_test$Category))
+  normality_results_list <- list()
+  
+  for (group_name in names(grouped_data)) {
+    group <- grouped_data[[group_name]]
+    if (nrow(group) < 3) {
+      normality_results_list[[group_name]] <- data.frame(
+        Site = NA, Time_Category = NA, Category = NA,
+        Percent_Cover_p_value = NA,
+        message = "Not enough data for normality test"
+      )
+      next
+    }
+    normality_test <- shapiro.test(group$Percent_Cover)
+    
+    normality_results_list[[group_name]] <- data.frame(
+      Site = unique(group$Site),
+      Time_Category = unique(group$Time_Category),
+      Category = unique(group$Category),
+      Percent_Cover_p_value = normality_test$p.value,
+      message = "Normality test completed"
+    )
+  }
+  
+  normality_results_df <- do.call(rbind, normality_results_list)
+  return(normality_results_df)
+}
+
+# Run normality tests
+normality_results <- test_normality(df_long_test)
+
+# Display results
+normality_results %>%
+  mutate(Percent_Cover_p_value = round(Percent_Cover_p_value, 3)) %>%
+  kable(
+    caption = "Normality Test Results for Percent_Cover",
+    col.names = c("Site", "Time Category", "Category", "Percent Cover P-Value", "Message"),
+    align = "c",
+    row.names = FALSE
+  )  # p < 0.05 suggests non-normality
+
+############################ Function to run Levene's Test for homogeneity of variance
+run_levenes_test <- function(df_long_test) {
+  df_long_test %>%
+    group_by(Category) %>%
+    summarise(
+      Levene_p_value = leveneTest(Percent_Cover ~ interaction(Site, Time_Category), 
+                                  data = pick(everything()))$"Pr(>F)"[1]
+    ) %>%
+    ungroup()
+}
+
+# Run test separately for Midchannel & Banks
+levene_results <- run_levenes_test(df_long_test)
+
+# Display Levene’s test results with a formatted table
+levene_results %>%
+  mutate(Levene_p_value = round(Levene_p_value, 3)) %>%  # Round for readability
+  kable(
+    caption = "Levene's Test for Homogeneity of Variance",
+    col.names = c("Category", "Levene P-Value"),
+    align = "c",
+    row.names = FALSE
+  ) # If p < 0.05, variance differs
+
+######################### Function to calculate skewness and kurtosis
+calculate_skew_kurt <- function(df_long_test) {
+  df_long_test %>%
+    group_by(Category) %>%
+    summarise(
+      Skewness = skewness(Percent_Cover, na.rm = TRUE),
+      Kurtosis = kurtosis(Percent_Cover, na.rm = TRUE)
+    ) %>%
+    ungroup()
+}
+
+# Calculate separately for Midchannel & Banks
+skew_kurt_result <- calculate_skew_kurt(df_long_test)
+skew_kurt_result %>%
+  mutate(Skewness = round(Skewness, 3), Kurtosis = round(Kurtosis, 3)) %>%  # Round for readability
+  kable(
+    caption = "Skewness and Kurtosis for Percent Cover",
+    col.names = c("Category", "Skewness", "Kurtosis"),
+    align = "c",
+    row.names = FALSE
+  )
+```
+
+If, based on the above evaluation, your data appear to be unsuitable for the intended inferential test you may wish to use an alternative test or transform the data. We first provide some assistance for transformations, but this part may require some more work on your part since we cannot predict what your data will need.
+
+As an example, our data appeared non-normally distributed for the midchannel data (light-tailed in QQ plots, p<0.05 Shapiro-Wilk), so we opted to try some transformations. We applied transformations to both variables to err on the side of caution because of a limited sample size (lower statistical power to detect non-normality) in the banks data. After trying a few transformations, we could not improve the suitability for the ANOVA, but your case may differ.
+
+The code we used for the transformation is below. If you need to transform the data, follow these steps:
+
+### Transformations
+
+1. Add your transformation(s) to the code chunk below. You must add a formula to calculate an appropriate transformation for Midchannel and/or Banks (as appropriate)  within each *Category == * line. Examples for square root and log transformations are provided below.
+
+2. Re-run the above diagnostics code after updating the variable name. Where it says *Percent_Cover*, change this to *Transformed_Cover*. You can use CTRL+F to search and replace, but careful not to alter matches outside of that code chunk).
+
+3. Once you have a transformed variable that meets the assumptions of the ANOVA, update the ANOVA inferential test code (in the subsequent code chunk) to use "*Transformed_Cover*"
+
+```{r transformations}
+# Define transformations below for each variable separately at each 'Category ==' line. 
+## e.g. replace 'identity(Percent_Cover)' with 'sqrt(Percent_Cover)' for square root transformation, 
+## or with 'log(Percent_Cover+1)' for log-transformation (remember th +1 in case you have 0s in your data),
+## or with anything else your heart desires.
+# Use 'identity' if no transformation is needed
+
+#add transformed data variable/column
+df_long_test <- df_long_test %>%
+  mutate(Transformed_Cover = case_when(
+    Category == "Midchannel" ~ identity(Percent_Cover),  
+    Category == "Banks" ~ identity(Percent_Cover),  
+    TRUE ~ Percent_Cover  # Keep unchanged for other categories
+  ))
+
+# Remember if you use a transformation, once you confirm the transformation is suitable using the preceding tests, ensure that the anova code below calls the correct transformed variable
+```
+
+### ANOVA 
+
+We now use ANOVA to ask whether canopy cover at the midchannel and at the banks differs among sites, over time, and for the crucial site*time interaction.
+
+If you did use transformed data, ensure you reference that variable in the below code (e.g., change *Percent_Cover* to *Transformed_Cover*).
+
+If neither your original nor transformed cover metrics appeared suitable for ANOVA, skip this part and we will provide an alternative approach: a Beta regression.
+
+```{r canopy cover ANOVAs}
+# Perform ANOVA for Midchannel category
+anova_midchannel <- df_long_test %>%
+  filter(Category == "Midchannel") %>%
+  aov(Percent_Cover ~ Site * Time_Category, data = .)#Alter *Percent_Cover* to *Transformed_Cover* in this line if you transformed data
+
+# Perform ANOVA for Banks category
+anova_banks <- df_long_test %>%
+  filter(Category == "Banks") %>%
+  aov(Percent_Cover ~ Site * Time_Category, data = .) #Alter *Percent_Cover* to *Transformed_Cover* in this line if you transformed data
+```
+
+```{r print ANOVAs export, echo = FALSE}
+print("_______________ANOVA for Midchannel Canopy Cover______________")
+summary(anova_midchannel)
+print("_______________ANOVA for Both Banks Canopy Cover______________")
+summary(anova_banks)
+
+midchannel_output <- capture.output(summary(anova_midchannel))  # 
+banks_output <- capture.output(summary(anova_banks))  # 
+summary_text <- c("ANOVA for Midchannel Canopy Cover\n", midchannel_output, "\n\n\n", "ANOVA for Both Banks Canopy Cover\n", banks_output,"\n\n\n")
+export_summary(summary_text, "Stream Canopy Cover ANOVAs")
+```
+
+If your data were suitable for an ANOVA, you can stop here. Take some time to ensure you understand what the above tells you, particularly with regards to the interaction term. Remember that the ANOVA tells us whether the observed pattern is likely to be due to the effect of site, time, or their interaction, or whether it is likely to be due to random chance / unmeasured factors. You must consider this in the context of your restoration project, your hypotheses and predictions, and any other information about your system that may have been unmeasured but potentially contributed differentially to the sites.
+
+We highly recommend finding another person (or several) to talk it through with. Take a step back to think about the big picture. Can you now say with some confidence that your project appears to have caused the predicted change in habitat, and that change is known to be positively correlated with the ultimate restoration objective? I hope so, but even if that is not the case, I hope the information you collected and analysed is useful in your adaptive management plans.
+
+### Option: Beta Regression
+
+If your (transformed) data were unsuitable for the ANOVA, we propose using Beta regressions. These are suitable for continuous, proportion-based outcomes (such as a rating system bounded by 0 and 17, or a percentage), and they handle interaction terms like Site*Time effectively even if data are non-normal or skewed. 
+
+<div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; background-color: #f9f9f9; font-size: smaller;">
+Slightly nerdy bit, feel free to ignore: Beta regressions are capable of dealing with non-normal heteroscedastic data. Although they cannot actually handle 0% and 100% (the boundary cases), we feel they are preferable over two-part models (e.g. hurdle models): Since an observation of 0 spherical densiometer intersections can include cases where cover is present in places other than the interesections, and observations of 17 can include cases where sky is visible between intersections, we are comfortable adjusting the 0% and 100% to 0.001% and 99.999%. We feel a hurdle model would excessively complicate interpretability (e.g. a binomial cover presence/absence mechanism plus a cover extent mechanism). See Geissinger et al 2022 if interested.
+</div>
+
+We will generate a frequency plot of the fine proportion data, fit the Beta regression, and plot the frequency distribution of the residuals (which should be broadly symmetrical around zero) and their relationships to the fitted values (for which no clear relationship or heteroscedasticity should be evident). We will export the results of the Beta regression to your output folder.
+
+```{r beta models, warning=FALSE, echo = FALSE}
+# Step 1: Adjust values of exactly 0 or 1 (if any) & Convert to proportion
+df_long_test <- df_long_test %>%
+  mutate(Percent_Cover_Adjusted = case_when(
+    Percent_Cover == 0 ~ 0.001,  # Adjust 0
+    Percent_Cover == 100 ~ 99.999,  # Adjust 100
+    TRUE ~ Percent_Cover
+  ) / 100)  # Convert to proportion
+
+# Function to run beta regression for each category (Midchannel and Banks)
+run_beta_regression <- function(data, category) {
+  # Subset data for the given category
+  df_subset <- data %>% filter(Category == category)
+  
+  # Histogram of Adjusted Proportions
+  p0 <- ggplot(df_subset, aes(x = Percent_Cover_Adjusted)) +
+    geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+    geom_density(color = "red", linewidth = 1) +
+    labs(title = paste("Adjusted Percent Cover Distribution for", category),
+         x = "Adjusted Percent Cover", y = "Frequency") +
+    theme_minimal()
+  print(p0)  # Ensure the plot is displayed
+  
+  # Fit Beta regression
+  beta_model <- betareg(Percent_Cover_Adjusted ~ Site * Time_Category, data = df_subset)
+
+ # Create Model Summary
+  model_summary <- summary(beta_model)
+
+  # Print model summary to RStudio console
+  print(paste("Stream Canopy Cover Beta Regression Results for", category))
+  print(model_summary)  
+
+  # Export the summary to a text file
+  summary_text <- capture.output(model_summary)  # Capture the summary as text
+  export_summary(summary_text, paste("Stream Canopy Cover Beta Regression for", category))  # Save to text file
+
+   # Diagnostic plots
+  df_subset$residuals <- residuals(beta_model, type = "pearson")
+  df_subset$fitted <- fitted(beta_model)
+
+  # Histogram of Residuals
+  p1 <- ggplot(df_subset, aes(x = residuals)) +
+    geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+    geom_density(color = "red", linewidth = 1) +
+    labs(title = paste("Residual Distribution for", category),
+         x = "Residuals", y = "Frequency") +
+    theme_minimal()
+  print(p1)  # Ensure the plot is displayed
+
+  # Fitted vs Residuals Plot
+  p2 <- ggplot(df_subset, aes(x = fitted, y = residuals)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    labs(title = paste("Fitted vs Residuals for", category),
+         x = "Fitted Values", y = "Residuals") +
+    theme_minimal()
+  print(p2)  # Ensure the plot is displayed
+  
+  # Export Summary
+  summary_text <- capture.output(summary(beta_model))
+  export_summary(summary_text, paste("Beta Regression for", category))
+}
+
+# Run Beta Regression separately for "Midchannel" and "Banks"
+run_beta_regression(df_long_test, "Midchannel")
+run_beta_regression(df_long_test, "Banks")
+```
+
+Since you may not be familiar with Beta regression, here are some basics on interpretation for the test output:
+
+- "Optimization failed to converge..." If you see this warning, it may be that there were 0 values across an entire Site. This should be fairly easy to interpret without inferential tests.
+
+- Quantile residuals measure the difference between the actual data and predicted values. The median should be close to 0. Also check the residuals vs fitted plot to ensure there is no clear trend or unusual outliers
+
+- Coefficients (mean model): these are the effects of the predictors (site, time) on the response variable (canopy cover). **Look for significant p values in the last column, particularly for the Site\_\_\_\_\_\:Time\_Category\_\_\_\_\_ row, which is the interaction term (if significant, this means the canopy cover changed over time differently between sites)**. 
+
+- Phi coefficients: there is a p-value here as well, but this refers to whether the spread of the data around the mean was an important feature. If the phi estimate is very high, this means the data was concentrated around the mean (fines proportion doesn't fluctuate much between sites/times). Consider phi of 0.1 to be spread out data, 1 to be moderate, and 10 to be concentrated around the mean.
+
+- Pseudo R-squared: this is how much of the variation in canopy cover can be explained by the site and time variables. Often low in ecological contexts.
+
+Take some time to ensure you understand what the above tells you, particularly with regards to the interaction term. Remember that the regression tells us whether the observed pattern is likely to be due to the effect of site, time, or their interaction, or whether it is likely to be due to random chance / unmeasured factors. You must consider this in the context of your restoration project, your hypotheses and predictions, and any other information about your system that may have been unmeasured but potentially contributed differentially to the sites.
+
+We highly recommend finding another person (or several) to talk it through with. Take a step back to think about the big picture. Can you now say with some confidence that your project appears to have caused the predicted change in habitat, and that change is known to be positively correlated with the ultimate restoration objective? I hope so, but even if that is not the case, I hope the information you collected and analysed is useful in your adaptive management plans.
+
+# References
+
+Geissinger, E.A., Khoo, C.L., Richmond, I.C., Faulkner, S.J. and Schneider, D.C., 2022. A case for beta regression in the natural sciences. Ecosphere, 13(2), p.e3940.
+
+Oregon Watershed Enhancement Board. 2000. Addendum to Water Quality Monitoring Technical Guide Book: Chapter 14. Stream Shade and Canopy Cover Monitoring Methods [online]. Available at: Stream Shade and Canopy Cover, Water Quality Guidebook Addendum, Chapter 14 (oregon.gov)

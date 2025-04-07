@@ -1,0 +1,12 @@
+"DELETE THIS ENTIRE ROW BEFORE IMPORTING TO R. DO NOT CHANGE COLUMN NAMES. EACH ROW REPRESENTS A TRANSECT. COLUMNS 'SITE', 'DATE', 'STAFF', 'OBSERVER', AND 'TRANSECT_SPACING_M' DO NOT REQUIRE VALUES AT EACH ROW UNLESS MULTIPLE VALUES EXIST IN DATAFRAME",,,,,,,,,,,,
+Site,Date,Staff,Observer,Transect_No.,Left_Bank,Middle_Left,Middle_Upstream,Middle_Downstream,Middle_Right,Right_Bank,Comments,Transect_Spacing_m
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
+,,,,,,,,,,,,
