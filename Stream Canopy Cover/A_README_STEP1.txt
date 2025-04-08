@@ -36,6 +36,6 @@ We are in the process of producing more Monitoring Packages that you can choose 
 
 The standardised data you collect can be highly valuable beyond your projects. Please share your data to the SHaRe (Salmon Habitat Restoration) System, so that others can conduct research and meta-analyses, to learn from and improve our restoration efforts on a broader scale.
 
-Best of luck in your restoration efforts, and thank you for taking the time to care
+Best of luck in your restoration efforts
 
 

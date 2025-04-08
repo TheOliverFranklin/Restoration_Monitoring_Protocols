@@ -1,0 +1,1407 @@
+---
+title: "Pebble Count Data Analysis"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    code_download: true 
+---
+
+```{r setup, include=FALSE} 
+# Load required libraries and install any missing ones. This code loads the package to the work area and, if it is not installed, installs it.
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set all figures in the document to be the same width (max page width)
+knitr::opts_chunk$set(fig.width = 10, fig.height = 6, out.width = "100%")
+
+
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(rmarkdown,dplyr,htmltools, leaflet, tidyverse,cowplot,knitr,readxl,kableExtra,sf,tmap,reactable,rmarkdown,viridis, gridExtra, DT, htmlwidgets, scales,lemon,car, moments, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary.
+
+# Apply a global theme to all plots (so that figure text is large enough)
+theme_set(theme_classic(base_size = 14))  # Adjust base font size globally
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Figure Title.pdf")
+# export_plot(plotly_plot, "Figure Title.html")
+# 
+# # Exporting a table
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(mtcars)
+# export_summary(summary_text, "summary")
+```
+
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types for LWD data
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Staff                 = "character",
+    Observer              = "character",
+    Habitat_ID            = "character",
+    GPS_WPT               = "character",
+    Pebble_No.            = "character",
+    B_Axis_T1             = "character", # must allow for text (sand/fines) AND numbers
+    B_Axis_T2             = "character", # must allow for text (sand/fines) AND numbers
+    B_Axis_T3             = "character", # must allow for text (sand/fines) AND numbers
+    Notes                 = "character"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+  
+    return(df)
+}
+```
+
+Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
+
+You should be approaching data analysis with a set of established hypotheses, predictions, and plans for the various outcomes. If you are not familiar with the importance of *a priori* hypotheses and the dangers of data dredging, please spend some time reading up on these. Only once you have your hypotheses and predictions in mind (and ideally on paper) should you continue. We recommend revisiting your predictions and interpretations of possible outcomes before you run every single statistical test.
+
+# Guidance Format
+
+We have written these data analysis scripts in R markdown (.rmd files) and printed them as .html documents. As **Step 1** we recommend that you read through the .html files, which we printed using some example data. The .html files contain all the written guidance, but omit most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+# Data Wrangling
+
+Data wrangling, or cleaning and structuring the data, is the first step before analysis. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+First we combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Note that b-axis length measurements should be in millimeters and particles (grains) < 1 mm should be classified as either sand (if gritty between fingers) or fines. 
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Pebble Count/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE, warning=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  ) %>%
+  
+  #account for text in b-axis column, standardize the text as 'sand' and 'fines' 
+  mutate(
+    across(starts_with("B_Axis_T"), ~ case_when(
+      grepl("^\\d+(\\.\\d+)?$", .) ~ as.character(as.numeric(.)),  # Keep numbers as character (this will be adjusted below)
+      grepl("sand", ., ignore.case = TRUE) ~ "sand", # account for variety of character strings for sand (caps/lowercase) and call it 'sand'
+      grepl("fine", ., ignore.case = TRUE) ~ "fines" # account for variety of character strings for fines (caps/lowercase) and call it 'fines'
+  ))) %>%
+ 
+   # check if the value contains numbers or decimals, if true, convert to numeric, if false, leave as character
+  mutate(
+    B_Axis_T1 = ifelse(grepl("^[0-9.]+$", B_Axis_T1), as.numeric(B_Axis_T1), B_Axis_T1), 
+    B_Axis_T2 = ifelse(grepl("^[0-9.]+$", B_Axis_T2), as.numeric(B_Axis_T2), B_Axis_T2),
+    B_Axis_T3 = ifelse(grepl("^[0-9.]+$", B_Axis_T3), as.numeric(B_Axis_T3), B_Axis_T3)
+  )
+```
+
+It may be necessary to subset within this dataframe if, e.g., you included more than one channel in your .csv files (surveys of multiple tributaries etc.). These scripts are intended to analyse one focal channel per reach, to compare it over time and with independent reference reaches that also feature one channel each. The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways.
+
+``` {r subset option}
+# df <- subset(df, Site %in% c("Site 1", "Site 2")) 
+
+# if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the site names within the brackets with the sites you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
+
+```
+
+Let's take a brief look through the dataframe. Look out for any errors and explore unusual entries. 
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+
+
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we also isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to 'ymd', 'myd', 'dym', etc.):
+
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$Year <- year(df$parsed_date)        # Extract the year
+```
+
+# Export Data
+
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/PebbleCount"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from these scripts. Some of the outputs (dataframes) may be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted in the 'console' box, you will need to enter the folder location (e.g. C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+
+
+We will now export the tidied dataframe so that it can be used in future analyses as needed. Check your file folder and the .csv files to see the data you exported before moving on.
+
+```{r df export, echo = FALSE}
+export_table(as.data.frame(df),"PebbleCount_dataframe.csv")
+PC_data<-df # create with new name for use in code below
+```
+
+
+# Pebble Count Analyses
+
+The Pebble Count field survey collects surface substrate data within targeted mesohabitats. The protocol is primarily intended for use in riffles to document changes in the substrate particle size distribution associated with restoration actions. While this is of particular interest for salmonid spawning habitat, it is also useful more broadly, e.g. for monitoring changes in substrates associated with an altered sediment or flow regime.
+
+This code estimates surface particle size distributions for the focal mesohabitat, which can be compared before/after restoration actions and/or between control and restoration sites. Particle size distributions are often also compared against benchmarks, such as published ranges of gravel sizes that are known to be used by particular salmonids.
+
+Let's briefly recall the survey methodology:
+
+Field teams randomly selected three of the focal mesohabitat units (e.g., riffles) in the study reach. Within each focal mesohabitat unit, they visually estimated locations for three transects, and measured the b-axis diameter of 12 particles along each transect. At the end of the survey, teams will have measured 108 particles in total.    
+
+Optional: If you would like to plot the locations of each of your sites on a map, at this point you should create a .csv file with columns for 'Site_Name', 'Longitude', and 'Latitude'. Specify the location of this file in the code below:
+
+```{r import data, message=FALSE, warning=FALSE}
+# Load in Site location information, amend the path in the code below to link to your .csv of the location data
+site_file <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Pebble Count/Sites.csv"
+```
+```{r check if file exists, echo=FALSE, message=FALSE, warning=FALSE}
+if (file.exists(site_file)) {
+  site_data <- read.csv(site_file, header = TRUE)
+} else {
+  site_data <- NULL  # Assign NULL if file does not exist
+}
+```
+```{r show study location,echo=FALSE, message=FALSE, warning=FALSE}
+
+if (!is.null(site_data)) {
+# Convert site data to sf object
+site_sf <- site_data %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) # WGS84 coordinate system
+
+# Extract coordinates for leaflet
+site_coords <- site_sf %>%
+  st_coordinates() %>% # Extract Longitude and Latitude
+  as.data.frame() %>% # Convert to a data frame
+  cbind(st_drop_geometry(site_sf)) # Combine coordinates with site data (i.e., Station_Name)
+
+
+# Create interactive map with leaflet 
+leaflet_map <- leaflet(data = site_coords) %>%
+  addProviderTiles("Esri.WorldImagery", group = "World Imagery") %>% # add basemap layers; will toggle between both
+  addProviderTiles("Esri.WorldTopoMap", group = "World TopoMap") %>% # add basemap layers; will toggle between both 
+  addCircleMarkers( # add circle markers for station locations
+    lng = ~X,  # Longitude column
+    lat = ~Y,  # Latitude column
+    radius = 5,  # Default marker radius
+    fillColor = "blue", # marker colour
+    fillOpacity = 1, # transparency of markers
+    stroke= F, # remove circle outline
+    popup = ~Site_Name, # Site names will pop up when hovered over (interactive plot)
+  ) %>%
+  addLayersControl(
+    baseGroups = c("World TopoMap"," World Imagery"), # basemap toggle options 
+    options = layersControlOptions(collapsed = TRUE) # Keep layers control minimized, change to FALSE if you want to see the layer toggle options
+  ) %>%
+  # JavaScript to adjust marker size dynamically based on zoom level
+  htmlwidgets::onRender(
+    "function(el, x) {
+       var map = this;                                            // Reference the map object
+       map.on('zoomend', function() {                             // Event triggered when zoom changes
+         var zoom = map.getZoom();                                // Get current zoom level
+         map.eachLayer(function(layer) {                          // Iterate through all map layers
+           if (layer instanceof L.CircleMarker) {                 // Target circle markers only
+             var newRadius = zoom < 5 ? 10 : (zoom < 10 ? 6 : 4); // Adjust radius based on zoom level; zoom < 5: large markers (radius = 10), zoom 5-10:                                                                       // medium markers (radius = 6), zoom > 10: small markers (radius = 4)
+             layer.setRadius(newRadius);                          // Update marker size
+           }
+         });
+       });
+     }"
+  )
+
+leaflet_map
+}
+
+```
+
+## Cumulative Frequency Distribution Table
+
+Eaton et al. (2019) developed a package called [GSDtools](https://zenodo.org/records/3229387) to support the analysis of pebble count data. We will use the functions they developed throughout our analyses, and we are very grateful for all their work.
+
+
+```{r load GSDtool functions ,echo=FALSE}
+## this big chunk of code contains the functions from Eaton et al 2019 that will be used in following code chunks
+
+# {MakeCFD} is a function that creates a data frame containing the cumulative grain size distribution information for a sample of n observations of b axis diameter (in mm).
+
+# The function returns a data frame listing upper bounds of each size class containing data, as well as the cumulative proportion of the observations that fall below the given grain size. The output of this function is the required input for other functions. In order to retain information about the sample size, there is the option to output the total counts for each size class, as well.
+
+# 'obs' vector containing b-axis measurements of gravel bed surface
+# 'increment' an optional parameter to control the size of the grain size
+# classes used for the analysis (1.0 = 1.0 phi intervals, 0.5 = 1/2 phi intervals, 0.25 = 1/4 phi intervals, etc.). Default value is 0.5. which corresponds to gravelometer openings
+
+#  'count' optional flag to record the number of observations falling in each size class as an additional variable in the output data frame
+# 'plot' optional flag to produce a graph of the resulting grain size distribution
+
+
+# Function to create a Cumulative Frequency Distribution (CFD) from a set of observations.
+MakeCFD = function(obs, increment = 0.5, count = FALSE, plot = FALSE){
+  # Get the number of observations
+  n = length(obs)
+  
+  # Determine the Logarithmic bin range for grain size 
+  max.phi = ceiling(log2(max(obs,na.rm = TRUE))) # Upper boundary in Log2 scale
+  min.phi = floor(log2(min(obs,na.rm = TRUE))) # Lower boundary in Log2 scale
+  
+  # Generate a sequence of grain sizes in Log2 scale
+  size = 2^seq(from = min.phi, to = max.phi, by = increment)
+  
+  # Create a histogram of observations without plotting it 
+  results = hist(obs,
+                 breaks = size,
+                 plot = FALSE)
+  
+  # Initialize a dataframe to store the cumulative frequency distribution
+  cfd = data.frame(size)
+  
+  # Compute cumulative probability distribution
+  # cumsum(results$counts) gives cumulative counts
+  # Division by sum(results$counts) normalizes it into proportions
+  cfd$probs = c(0, cumsum(results$counts))/sum(results$counts)
+
+  # If count = TRUE, add absolute counts to the dataframe
+  if(count == TRUE){
+    cfd$counts = c(0,results$counts)
+  }
+
+  # If plot = TRUE, generate a plot of the cumulative frequency distribution
+  if(plot == TRUE){
+    plot(cfd[[1]], cfd[[2]], # X-axis: size, Y-axis: cumulative proportion
+         type = "b",         # Line with points
+         col = "blue",       # Blue color
+         log = "x",          # Logarithmic scale for x-axis
+         xlab = "grain size (mm)",
+         ylab = "cum. prop. finer")
+  }
+
+  # Return the cumulative frequency distribution dataframe
+  return(cfd)
+}
+
+# Calculate the confidence interval for a quantile 'p'
+#
+# {QuantBD} uses the  binomial distribution to compute a near-symmetric distribution-free confidence interval for a quantile 'p'.
+# Returns indices for the order statistics, along with coverage probability.
+
+# The function returns the indices representing a percentile confidence interval that contains the population quantile of interest, assuming a given confidence level. The script also returns the probability coverage for the confidence interval. Finally, the function returns an approximation of the confidence interval that has equal areas in the tails of the distribution.
+
+# 'n' the sample size
+# 'p' the desired quantile to be estimated from the sample in the range [0,1]
+# 'alpha' the confidence level (default value is 0.05) for a 95% confidence interval
+
+ 
+QuantBD <- function(n, p, alpha = 0.05) {
+  
+  # Compute upper (u) and lower (l) binomial quantiles for the confidence interval
+  u <- qbinom(1 - alpha/2, n, p) + (-2:2) + 1 # Upper bound adjustments
+  l <- qbinom(alpha/2, n, p) + (-2:2)   # Lower bound adjustments
+  
+  # Ensure upper bounds do not exceed sample size n
+  u[u > n] <- Inf
+  
+  # Ensure lower bounds are not below 0
+  l[l < 0] <- -Inf
+  
+  # Compute the probability coverage for each (l, u) pair
+  p_c <- outer(l, u, function(a, b) pbinom(b-1, n, p) - pbinom(a-1, n, p))
+  
+  # Select the interval that has the closest coverage to (1 - alpha)
+  if (max(p_c) < 1 - alpha) {
+    # If no interval reaches desired coverage, pick the max available
+    i <- which(p_c == max(p_c))
+    # Otherwise, choose the smallest interval that meets or exceeds coverage
+  } else {
+    i <- which(p_c == min(p_c[p_c >= 1 - alpha]))
+  }
+  # If there are multiple candidates, select the first one
+  i <- i[1]
+
+   # Extract the corresponding best upper and lower bounds
+  u <- rep(u, each = 5)[i]
+  l <- rep(l, 5)[i]
+
+ # Compute the cumulative binomial probability distribution
+  k = 1:n
+  pcum = pbinom(k, n , p)
+  
+# Compute an approximate equal-tail confidence interval
+  lu_approx = approx(x = pcum, y = k, xout = c(alpha/2, 1 - alpha/2))$y
+
+  # Return the interval, coverage probability, and equal-tail approximation
+  list(interval = c(l, u), coverage = p_c[i], equaltail = lu_approx)
+}
+
+
+# Calculate the percentile sizes and grain size confidence intervals for a sample
+#
+# {WolmanCI} is a function that uses cumulative frequency distribution data for Wolman or grid-by-number samples of bed surface texture to estimate the value of user-specified percentiles. The function also uses the binomial distribution to estimate the confidence intervals corresponding to a user-specified confidence level, based on the number of grain size measurements that were used to construct the cumulative frequency distribution.
+
+# The function returns a data frame listing the estimate of each percentile, the upper limit, and the lower limit.
+
+# 'cfd' is a data frame providing a list of grain sizes in the first variable and the corresponding cumulative proportion finer in the second. The grain sizes should be recorded in mm, and the proportion finer in [0,1].
+# 'n' is the total number of observations upon which the cumulative frequency distribution in {cfd} is based
+# 'P' numeric vector of percentiles to estimate. The default is to estimate the 5th to the 95th percentile, in increments of 5.
+# 'equaltail' is a logical variable that determines whether the calculations of the confidence interval are based on an approximation with equal areas in each tail (the default), or based on the exact binomial solution with a coverage of at least 95%
+# 'alpha'  the desired confidence level for which to calculate a confidence interval in [0,1].
+
+
+WolmanCI = function(cfd, n,  P = seq(5, 95, 5), equaltail = T,  alpha = 0.05){
+ # use the binomial approach 
+ # Convert percentile values to probabilities (e.g., 5% -> 0.05)
+  probs = P/100  
+  
+  # Initialize vectors to store upper and lower confidence limits
+  p.upper = vector(mode="numeric", length = length(probs))
+  p.lower = vector(mode="numeric", length = length(probs))
+  
+  # Compute confidence intervals using the binomial approach
+  if (equaltail == T){
+     
+    # Use equal-tail confidence intervals
+    for(i in seq_along(probs)){
+      tmp = QuantBD(n, probs[i], alpha) # Call QuantBD function to get interval
+      p.upper[i] = tmp$equaltail[2]/n   # Upper bound (normalized)
+      p.lower[i] = tmp$equaltail[1]/n   # Lower bound (normalized)
+    }
+  }else{
+    
+    # Use shortest interval confidence intervals
+    for(i in seq_along(probs)){
+      tmp = QuantBD(n, probs[i], alpha)  # Call QuantBD function
+      p.upper[i] = tmp$interval[2]/n     # Upper bound (normalized)
+      p.lower[i] = tmp$interval[1]/n     # Lower bound (normalized)
+    }
+  }
+
+  # estimate percentiles
+  # Convert grain size data from cfd to log2 scale
+  phi = log2(cfd[[1]])   # Log-transform grain sizes
+  X = cfd[[2]]           # Cumulative proportion finer
+  
+  # Estimate percentiles using linear interpolation
+  estimate = 2^approx(x = X, y = phi, xout = probs, rule = 2)[[2]]
+  
+   # Compute upper and lower confidence limits for percentiles
+  upper = 2^approx(x = X, y = phi, xout = p.upper, rule = 2)[[2]]
+  lower = 2^approx(x = X, y = phi, xout = p.lower, rule = 2)[[2]]
+  
+   # Store results in a data frame
+  results = data.frame(P, estimate, lower, upper)
+  colnames(results) = c("percentile", "estimate", "lower", "upper")
+
+  return(results)
+}
+
+
+# Generate a polygon representing the confidence bounds for a grain size distribution
+
+# {PolyCI} is a function that generates a data frame containing the coordinates defining a polygon representing the confidence bounds around a bed surface grain size distribution. The function contains an option to generate a plot of the distribution showing the estimates of the percentiles between the D5 and the D95, as well as the confidence limits about those estimates.
+
+# The function returns a polygon object containing y coordinates that range from 0 to 1 (i.e. the proportion finer), and corresponding grain sizes that define the upper and lower bounds to the grain size confidence interval.
+
+# 'cfd' is a data frame providing a list grain sizes in the first variable and the corresponding cumulative proportion finer in the second. The grain sizes should be recorded in mm, and the proportion finer in [0,1].
+# 'n' is the total number of observations upon which the cumulative frequency distribution in {cfd} is based
+# 'P' numeric vector of percentiles defining the polygon vertices, with values in [0,100].
+# 'equaltail' is a logical variable that determines whether the calculations of the confidence interval are based on an approximation with equal areas in each tail (the default), or based on the exact binomial solution with a coverage of at least 95%
+# 'alpha' the desired confidence level for which to calculate a confidence interval in [0,1].
+# 'plot' optional flag to produce a graph of the resulting grain size distribution
+
+
+PolyCI = function(cfd, n, P = seq(1, 99, 1), equaltail = T, alpha = 0.05, plot = FALSE){
+  # Convert percentile values to probabilities (e.g., 1% -> 0.01)
+  probs = P/100
+  # use the binomial approach
+  
+  # Initialize vectors for upper and lower confidence limits
+  p.upper = vector(mode="numeric", length = length(probs))
+  p.lower = vector(mode="numeric", length = length(probs))
+
+# Compute confidence intervals using the binomial approach  
+  if (equaltail == T){
+    # Use equal-tail confidence intervals
+    for(i in seq_along(probs)){
+      tmp = QuantBD(n, probs[i], alpha) # Call QuantBD function to get interval
+      p.upper[i] = tmp$equaltail[2]/n   # Upper bound (normalized)
+      p.lower[i] = tmp$equaltail[1]/n   # Lower bound (normalized)
+    }
+  }else{
+    # Use shortest interval confidence intervals
+    for(i in seq_along(probs)){
+      tmp = QuantBD(n, probs[i], alpha) # Call QuantBD function
+      p.upper[i] = tmp$interval[2]/n    # Upper bound (normalized)
+      p.lower[i] = tmp$interval[1]/n    # Lower bound (normalized)
+    }
+  }
+  
+  # Convert grain size data from cfd to log2 scale
+  # estimate percentiles
+  phi = log2(cfd[[1]]) # Log-transform grain sizes
+  X = cfd[[2]]          # Cumulative proportion finer
+  
+  # Estimate percentiles using linear interpolation
+  estimate = 2^approx(x = X, y = phi, xout = probs, rule = 2)[[2]]
+  
+  # Compute upper and lower confidence limits for percentiles
+  upper = 2^approx(x = X, y = phi, xout = p.upper, rule = 2)[[2]]
+  lower = 2^approx(x = X, y = phi, xout = p.lower, rule = 2)[[2]]
+
+  # Create polygon coordinates for confidence interval shading
+  x.poly = c(upper, rev(lower)) # X-coordinates: upper bound then reversed lower bound
+  y.poly = c(probs, rev(probs)) # Y-coordinates: corresponding probabilities
+  
+  # Store polygon data in a dataframe
+  poly.out = data.frame(x.poly, y.poly)
+
+  # If plot = TRUE, generate a plot with confidence intervals as a shaded polygon
+  if(plot == TRUE){
+    plot(cfd[[1]], cfd[[2]], # Plot grain size vs. cumulative proportion
+         type = "b",         # Line with points
+         pch = 20,           # Point shape
+         col = "blue",
+         log = "x",          # Logarithmic scale for x-axis
+         xlim = c(min(cfd[[1]]),max(cfd[[1]])), # X-axis limits based on data range
+         ylim = c(0.05,0.95),    # Y-axis limits
+         xlab = "grain size (mm)",
+         ylab = "cum. prop. finer")
+    
+    # Add confidence interval polygon to the plot
+    polygon(poly.out,
+            col=rgb(0, 0, 1,0.3), # Semi-transparent blue
+            lty = 0)              # No border line
+    
+    # Add horizontal reference lines at 5% and 95% percentiles
+    abline(h = c(0.05, 0.95))
+  }
+  
+  # Return the confidence interval polygon data
+  return(poly.out)
+}
+
+# Compare two grain size distribution samples to see if they are different
+
+# {CompareCFDs} is a function that takes two cumulative frequency distributions with the same format as the data frames produced by MakeCFD, and uses an inverse transform approach to numerically determine whether percentile estimates from the two samples are statistically different. The analysis requires only the cumulative frequency distribution for each sample and the number of stones measured to generate the distribution.
+
+# The function returns a data frame listing the percentile being compared, the estimate of that percentile for sample 1, the estimate for sample 2, and logical variable that indicates whether the percentiles are statistically different or not.
+
+# 'GSD1' is a data frame containing grain sizes (in mm) in the first column, and the proportion of the distribution finer in the second column for the first sample.
+# 'GSD2' is a data frame containing grain sizes (in mm) in the first column, and the proportion of the distribution finer in the second column for the second sample.
+# 'n1' is  the total number of observations upon which the cumulative frequency distribution in {GSD1} is based
+# 'n2' is the total number of observations upon which the cumulative frequency distribution in {GSD2} is based
+# 'P' numeric vector of percentiles to be compared. The default is to compare the 5th to the 95th percentile, in increments of 5
+# 'alpha'  the desired confidence level for which to calculate a confidence interval. The default is to set alpha = 0.05, for a 95% Confidence Interval
+
+
+CompareCFDs = function(GSD1, GSD2, n1, n2, P = seq(5,95, 5), alpha = 0.05){
+
+  nr = 10^3  # Number of Monte Carlo realizations (bootstrap resampling)
+  
+  # Matrices to store resampled percentile estimates
+  Dp1 = matrix(data = NA, nrow = nr, ncol = length(P))
+  Dp2 = matrix(data = NA, nrow = nr, ncol = length(P))
+
+   # Perform Monte Carlo resampling
+  for (i in 1:nr) {
+    # generate uniform random numbers for resampling
+    u1 = runif(n1, 0, 1) # Random values for sample 1
+    u2 = runif(n2, 0, 1) # Random values for sample 2
+
+    # convert from uniform to shape of sediment distribution using
+    # inverse transform approach
+    y1 = approx(GSD1[,2], log2(GSD1[,1]), u1)[[2]]
+    y1[is.na(y1)] = min(log2(GSD1[,1]))  #replicate the FINER than lim sampling effect
+    
+    y2 = approx(GSD2[,2], log2(GSD2[,1]), u2)[[2]]
+    y2[is.na(y2)] = min(log2(GSD2[,1]))  #replicate the FINER than lim sampling effect
+
+    # generate CFDs from the resampled data
+    F1s = bicalc::MakeCFD(2^y1) # Convert back to linear scale before computing CFD
+    F2s = bicalc::MakeCFD(2^y2)
+
+    # interpolate Dp using inverse-transform approach
+    Dp1[i,] = 2^approx(F1s$probs, log2(F1s$size), P/100)[[2]]
+    Dp2[i,] = 2^approx(F2s$probs, log2(F2s$size), P/100)[[2]]
+  }
+  
+   # Compute the differences between the resampled percentiles
+  deltaDp = Dp1 - Dp2
+
+  # hypothesis test - two tailed
+  CL = matrix(data = NA, ncol = 2, nrow = length(P))  # Store confidence limits
+  for(i in seq_along(P)){
+    CL[i,] = quantile(deltaDp[,i], c(alpha/2, 1 - alpha/2)) # Compute confidence interval
+  }
+  
+  # Identify statistically significant differences (if confidence intervals exclude zero)
+  dffrnt = CL[,1]*CL[,2]>0 # TRUE if both confidence bounds are either >0 or <0
+
+  # report sample estimates of the percentile
+  D1 = 2^approx(GSD1$probs, log2(GSD1$size), P/100)[[2]] # Sample 1 percentiles
+  D2 = 2^approx(GSD2$probs, log2(GSD2$size), P/100)[[2]] # Sample 2 percentiles
+
+  # create a data frame presenting the results
+  results = data.frame(P,D1,D2, dffrnt)
+  colnames(results) = c("Percentile", "Sample_1", "Sample_2", "Stat_Diff")
+  return(results)
+}
+
+#' Compare two sets of grain size measurements to see if they are different
+
+# {CompareRAWs} is a function that takes two sets of grain size observations and uses a resampling approach with replacement to estimate whether or not the grain sizes for a percentile of interest from the two sample sets are statistically different. The analysis requires the entire set of individual b-axis measurements.
+
+# The function returns a data frame listing the percentile being compared, the estimate of that percentile for sample 1, the estimate for sample 2, and a logical variable that indicates whether the percentiles are statistically different or not.
+
+# 'OBS1' is a vector containing individual b axis measurements (in mm) for the first sample.
+# 'OBS2' is a vector containing individual b axis measurements (in mm) for the second sample.
+# 'P' numeric vector of percentiles to be compared. The default is to compare the 5th to the 95th percentile, in increments of 5
+# 'alpha'  the desired confidence level for which to calculate a confidence interval. The default is to set alpha = 0.05, for a 95% Confidence Interval
+
+
+CompareRAWs = function(OBS1, OBS2, P = seq(5,95, 5), alpha = 0.05){
+  
+  # Determine sample sizes for both datasets
+  n1 = length(OBS1)
+  n2 = length(OBS2)
+
+  nr = 10^3  # Number of bootstrap realizations
+  
+  # Matrices to store resampled percentile estimates
+  Dp1 = matrix(data = NA, nrow = nr, ncol = length(P))
+  Dp2 = matrix(data = NA, nrow = nr, ncol = length(P))
+  
+  # Perform bootstrap resampling
+  for (i in 1:nr) {
+    # resample with replacement
+    y1 = sample(OBS1, n1, replace = T)
+    y2 = sample(OBS2, n2, replace = T)
+
+    # extract the percentiles from the resampled data sets
+    Dp1[i,] = as.numeric(quantile(y1, probs = P/100)) # Sample 1 percentiles
+    Dp2[i,] = as.numeric(quantile(y2, probs = P/100)) # Sample 2 percentiles
+  }
+  
+   # Compute the differences between the resampled percentiles
+  deltaDp = Dp1 - Dp2
+
+  # hypothesis test - two tailed
+  CL = matrix(data = NA, ncol = 2, nrow = length(P)) # Store confidence limits
+  for(i in seq_along(P)){
+    CL[i,] = quantile(deltaDp[,i], c(alpha/2, 1 - alpha/2)) # Compute confidence interval
+  }
+  
+  # Identify statistically significant differences (if confidence intervals exclude zero)
+  dffrnt = CL[,1]*CL[,2]>0
+
+  # report sample estimates of the percentile
+  D1 = as.numeric(quantile(OBS1, probs = P/100)) # Sample 1 percentiles
+  D2 = as.numeric(quantile(OBS2, probs = P/100)) # Sample 2 percentiles
+
+  # create a data frame presenting the results
+  results = data.frame(P,D1,D2, dffrnt)
+  colnames(results) = c("Percentile", "Sample_1", "Sample_2", "Stat_Diff")
+  return(results)
+}
+
+
+```
+
+First the data is structured to display the cumulative proportion of particles that are finer than given b-axis diameters, grouped by site and year. Your b-axis measurements will be binned into appropriate size classes and, for particles classified as either 'sand' or 'fines', we will assign b-axis diameter values of 0.25 mm for 'sand', and 0.016 mm for 'fines' (assigned based on values in the Wentworth scale).
+
+```{r re-shape data, echo=FALSE, warning=FALSE}
+
+# Ensure all B_Axis_T columns are treated as character before pivoting (do this because column has numeric and character entries)
+PC_data <- PC_data %>%
+  mutate(across(starts_with("B_Axis_T"), as.character))
+
+# Reshape data to compile B-axis measurements into one column
+PC_data_long <- PC_data %>%
+  pivot_longer(cols = starts_with("B_Axis_T"), #converts wide format into long format 
+               names_to = "Measurement", 
+               values_to = "size")%>% 
+  select(Site, Year, size)%>%
+  drop_na(size) %>% # Remove NA values
+ 
+   # assign numeric values to sand and fines
+  mutate(
+    size = case_when(
+      grepl("sand", size, ignore.case = TRUE) ~ 0.25,  # Assign sand = 0.25 mm
+      grepl("fine", size, ignore.case = TRUE) ~ 0.016, # Assign fines = 0.016 mm
+      TRUE ~ as.numeric(size)  # Keep numeric values as they are
+    )
+  )
+
+
+# Calculate cumulative percent finer
+# Split data by site and year
+split_data <- split(PC_data_long, list(PC_data_long$Site, PC_data_long$Year), drop = TRUE)
+
+# Apply MakeCFD to each subset using Map()
+results_list <- Map(function(df) {
+  cfd <- MakeCFD(df$size,count=TRUE,increment= 0.5)  # Apply function to 'size' column
+  cfd$Site <- unique(df$Site)  # Add site info
+  cfd$Year <- unique(df$Year)  # Add year info
+  return(cfd)
+}, split_data)
+
+# Convert list to a single data frame
+results_df <- do.call(rbind, results_list)
+
+# Reset row names
+rownames(results_df) <- NULL
+
+# View a formatted table
+datatable(
+  results_df %>%
+    mutate(
+      `Size class / mm` = size,
+      `Cumulative proportion` = probs,
+      `Count` = counts
+    ) %>%
+    select(Site, Year, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+) %>%
+  formatRound(columns = c("Size class / mm", "Cumulative proportion"), digits = 2)  # Round selected columns
+
+# Export the table
+export_table(as.data.frame(results_df), "Cumulative_Proportion_Finer_Than_by_year.csv")
+
+```
+The table above includes _Size Class_: the upper bound in mm of each size class containing data; _Cumulative proportion_: the cumulative proportion of the observations that fall below the corresponding size; and _Counts_: the number of observations falling into that particular size class. The table is also exported to your output folder.  
+
+
+
+## Estimating Distribution Percentiles 
+
+Now we estimate percentiles of your particle size distribution, denoted by $D_{P}$, where $D$ represents the b-axis diameter (mm) and the subscript $_{P}$ indicates the percentile of interest. For example, the $D_{16}$ value is the size (in mm) at which 16% of the sample is finer, $D_{25}$ the size at which 25% is finer, etc. 
+
+The most widely used percentile value is $D_{50}$, the median particle size (i.e., the point of the distribution that divides the distribution in two equal parts). Note that sample sizes of 100 particles are generally sufficient to estimate $D_{50}$, whereas obtaining precise and repeatable estimates toward the tails of the distribution would require larger sample sizes (Kondolf et al. 2003). As such, we recommend you focus your interpretation on $D_{50}$ unless you have specific reasons to include another percentile (and, if necessary, have increased the sample size). 
+
+The `WolmanCI` function (Eaton et al. 2019) generates confidence intervals for your chosen percentile(s). The function requires the number of particles that were measured, and we have included an automatic detection of your sample sizes in case measurements were missed / not possible during certain surveys. However, interpret the results very cautiously if less than 100 particles were measured.
+
+The code chunk below can be modified:
+
+- Adjust the percentiles estimated by modifying `my.percentile =c(50,84)` to include other percentiles of interest. In this example, we are calculating $D_{50}$ (median diameter) and $D_{84}$. 
+
+- `my.alpha` can be adjusted to the desired confidence level for which to calculate a confidence interval. In this example, the confidence interval is set to cover 95% of the data (i.e., alpha = 0.05). 
+
+
+```{r adjust parameters for confidence bound estimation}
+
+# Specify the percentile of interest
+my.percentile = c(50,84)
+
+#  Alternative code to generate your list of percentiles to estimate. 
+# my.percentile = seq(from = 1, to = 90, by = 1)  #generates all percentiles, 10 to 90
+# my.percentile = seq(from = 10, to = 90, by = 5)
+
+my.alpha = 0.05  #set the confidence interval to cover 95% of the data
+
+```
+
+The table below provides the estimates for your chosen percentiles and the upper and lower bounds for your chosen confidence interval. The table is also exported to your output folder.
+
+
+```{r Estimate confidence bounds, echo=FALSE, warning=FALSE}
+
+
+# Compute n (sample size) for each Site-Year combo from PC_data_long
+sample_sizes <- PC_data_long %>%
+  group_by(Site, Year) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Split cumulative frequency data (results_df) by Site-Year
+split_data <- split(results_df, list(results_df$Site, results_df$Year))
+
+# Apply WolmanCI to each subset with the correct n (sample size)
+results_list <- map(split_data, ~ {
+  cfd <- data.frame(size = .x$size, probs = .x$probs)
+  
+  # Extract Site and Year for this subset
+  Site <- unique(.x$Site)
+  Year <- unique(.x$Year)
+
+  # Get the correct sample size for this Site-Year
+  my.n <- sample_sizes %>%
+    filter(Site == unique(.x$Site), Year == unique(.x$Year)) %>%
+    pull(n)
+  
+  # Check that correct value is assigned for my.n
+  #print(paste("Processing Site:", Site, "Year:", Year, "n:", my.n))
+
+  # Apply WolmanCI with the correct n
+  WolmanCI(cfd, n = my.n, P = my.percentile, alpha = my.alpha)
+})
+
+# Convert list to data frame
+my.Dvalues <- bind_rows(results_list, .id = "Site_Year")
+
+# Separate Site and Year into different columns
+my.Dvalues <- my.Dvalues %>%
+  separate(Site_Year, into = c("Site", "Year"), sep = "\\.", convert = TRUE)
+
+
+# View the data
+datatable(
+  my.Dvalues,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+) %>%
+  formatRound(columns = c("estimate", "lower", "upper"), digits = 2)  # Round all numeric columns to 2 decimals
+
+# export the table
+export_table(as.data.frame(my.Dvalues), "Percentile_Estimates_and_CIs_by_year.csv")
+
+
+```
+
+
+The values above are useful metrics to compare particle size distribution among sites, across time, and/or with reference to specific benchmarks (e.g., targeted $D_{50}$ values based on channel stability, sediment transport analyses etc). In most cases, it will be of interest to compare your restoration site with a control/reference site, both before and after your restoration action, in order to control for unmeasured variability and interpret whether the change in substrates corresponds to your hypotheses and objectives. In the next section, we will generate figures and inferential tests to help interpret the observed data.
+
+#### Comparison with Benchmarks - Moveable Gravels
+
+Where available, you might also make use of existing knowledge applicable to your local system. For example, it may be of value to evaluate the substrate's suitability for spawning based on the sizes of particle that your target species are known to move. If that is the case, the following resources may complement local expert knowledge: 
+
+  - Kondolf, G.M. and Wolman, M.G. (1993). The sizes of salmonid spawning gravels. Water Resources Research 29: 2275±2285.
+
+  - Levy, D. A., & Slaney, T. L. (1993). A review of habitat capacity for salmon spawning and rearing. Resources Inventory Committee.
+
+  - Overstreet, B. T., Riebe, C. S., Wooster, J. K., Sklar, L. S., & Bellugi, D. (2016). Tools for gauging the capacity of salmon spawning substrates. Earth Surface Processes and Landforms, 41(1), 130–142. https://doi.org/10.1002/esp.3831 
+
+  - Riebe, C. S., Sklar, L. S., Overstreet, B. T., & Wooster, J. K. (2014). Optimal reproduction in salmon spawning substrates linked to grain size and fish length. Water Resources Research, 50, 898–918. https://doi.org/10.1002/2013WR014231
+
+Note that caution should be employed when interpreting results based on data collected in different systems and, ideally, benchmarks should be derived from observations within the study system itself. Fish select spawning substrates based on a variety of other factors (e.g., water depth, velocity, cover, and the presence of upwelling or downwelling currents; Kondolf and Wolman 1993). The influence of these factors and others may complicate the relationship between substrate size and spawner utilization.
+  
+## Data Visualization
+
+Now we will take a look at plots to compare the cumulative frequency distributions for your data. We will display three plots, and you should consider them all during your interpretation:
+
+- Cumulative frequency of particle size  _by year_ with confidence intervals (which will indicate e.g., the area we are 95 % certain that the distribution occupies). Very useful to identify particular outlier years, or trends over time. From this plot you can read off the proportion of substrate finer than a given grain size for each year of your data.
+
+- Box-and-Whisker plots of particle size distribution _by year_. These plots are helpful where there are many years of data and/or the distributions overlap (which is likely, unless your restoration made very drastic changes)
+
+- Cumulative frequency of particle size  _comparing 'before' with 'after'_ your restoration project, with confidence intervals. This plot is most aligned with the inferential tests we present, i.e., asking whether the restoration action appears to have changed the substrate size distribution.
+
+```{r cumulative freq. curve  ,echo=FALSE}
+## this plot not displayed/exported in favour of version with CIs
+
+# plot grain size distributions in cumulative frequency distribution curves with D50 highlighted (no CIs)
+
+#  Extract D50 values (50th percentile) from my.Dvalues
+D50_values <- my.Dvalues %>%
+ filter(percentile == 50) %>%
+  select(Site, Year, D50 = estimate)  # Rename column for clarity
+
+
+GSD_plot <-ggplot(results_df, aes(x = size, y = probs, color = factor(Year))) +
+  geom_line() +        # Line for CFD curve
+  geom_point(shape=1, size = 3) +  
+  scale_x_log10() +    # Log scale for grain size
+  annotation_logticks(sides = "b") +  # Logarithmic ticks on bottom (b = bottom, l = left, r = right, t = top)
+  facet_wrap(~Site,labeller = label_wrap_gen(width = 15)) +  # Wrap long titles and Facet by Site
+  scale_color_viridis_d(option = "D") +  
+  labs(
+    x = "Grain Size (mm)", 
+    y = "Proportion Finer",
+    color = "Year",
+    shape = "Year"
+  ) +
+   
+  
+#optional adjustments below
+
+# Add vertical lines that stop at D50 points 
+    #geom_segment(data = D50_values, aes(x = D50, xend = D50, y = 0, yend = 0.5, color = factor(Year)), 
+               #linetype = "dashed", alpha = 0.8) +
+  
+# Add points for D50 
+    geom_point(data = D50_values, aes(x = D50, y = 0.5, color = factor(Year)), 
+             size = 3, shape = 17)  # Triangle shape for D50
+ 
+# Add horizontal dashed line at 50% finer 
+    #geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray50") +
+  
+# Annotate D50 values 
+    # geom_text(data = D50_values, aes(x = D50, y = 0.55, label = round(D50, 1)), 
+           # size = 3, hjust = -0.2, show.legend = FALSE, color="black")  # Adjust label position
+  
+#GSD_plot
+
+# Export a figure
+#export_plot(GSD_plot, "Cumulative_Freq_by_year_D50_highlight.pdf")
+
+
+
+``` 
+
+### Cumulative frequency _by year_
+
+These curves allow for interpretation of estimated particle diameters at specific percentiles: Simply trace vertically from a grain size of interest in the logarithmic x-axis until the curve, then trace horizontally to the proportion on the y-axis. However, much of the value of these plots is being able to identify changes in the distribution by year: trends or outliers that may be interpretable based on your understanding of the system and restoration actions.
+
+Shaded polygons represent the 95% confidence intervals about the sample distribution, based on estimates ranging from $D_{10}$ to $D_{90}$. Note, the grain size confidence interval depends on the shape of the distribution, with more widely graded substrates having wider grain size confidence intervals than narrowly graded ones.(Eaton et al. 2019). 
+
+If you would like to use a different confidence interval, `my.alpha` can be adjusted in the code chunk below. Our default is 95% (i.e., alpha = 0.05).
+
+
+```{r option to adjust confidence level}
+
+my.alpha = 0.05
+
+```
+
+```{r plot_with_CI, echo=FALSE, warning=FALSE}
+
+my.percentiles = seq(from = 10, to = 90, by = 5)
+
+
+# Compute sample size (n) for each Site-Year combo from PC_data_long
+sample_sizes <- PC_data_long %>%
+  group_by(Site, Year) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Split cumulative frequency data (results_df) by Site-Year
+split_data <- split(results_df, list(results_df$Site, results_df$Year))
+
+# Apply PolyCI to each subset with the correct n (sample size)
+results_list <- map(split_data, ~ {
+  cfd <- data.frame(size = .x$size, probs = .x$probs)
+
+  # Extract Site and Year for this subset
+  Site <- unique(.x$Site)
+  Year <- unique(.x$Year)
+
+  # Get the correct sample size for this Site-Year
+  my.n <- sample_sizes %>%
+    filter(Site == unique(.x$Site), Year == unique(.x$Year)) %>%
+    pull(n)
+  
+  # Check that correct value is assigned for my.n
+  # print(paste("Processing Site:", Site, "Year:", Year, "n:", my.n))
+
+  # Apply PolyCI with the correct n
+  as.data.frame(PolyCI(cfd, n = my.n, P = my.percentiles, alpha = my.alpha))
+})
+
+# Convert list to data frame
+my.polygon <- bind_rows(results_list, .id = "Site_Year")
+
+# Separate Site and Year into different columns
+my.polygon <- my.polygon %>%
+  separate(Site_Year, into = c("Site", "Year"), sep = "\\.", convert = TRUE)
+
+
+
+## Create faceted plot
+
+GSD_CI_Plot <- ggplot() +
+  # Add the confidence interval polygon (shaded region)
+  geom_polygon(data = my.polygon, 
+               aes(x = x.poly, y = y.poly, group = interaction(Site, Year), fill = factor(Year)), 
+               alpha = 0.3) +  # Adjust transparency
+  
+  # Add the cumulative frequency curves
+  geom_line(data = results_df, 
+            aes(x = size, y = probs, color = factor(Year), group = interaction(Site, Year)), 
+            linewidth = 1) +
+  geom_point(data = results_df, 
+            aes(x = size, y = probs, color = factor(Year), group = interaction(Site, Year)), shape=1, size = 2) +
+  geom_hline(yintercept = c(0.1, 0.9), linetype = "dashed", color = "black") + # add lines indicating range of confidence interval
+  
+  # Facet by Site for separate plots
+  facet_wrap(~ Site, labeller = label_wrap_gen(width = 15)) +  # Wrap long titles and Facet by Site
+  
+  # Axis labels and theme
+  scale_x_log10() +  # Log scale for grain size
+  annotation_logticks(sides = "b") +  # Logarithmic ticks on bottom (b = bottom, l = left, r = right, t = top)
+  labs(x = "Grain Size (mm)", y = "Proportion Finer", 
+       color = "Year", fill = "Year") +
+  
+  # Use the Viridis color palette
+  scale_color_viridis_d(option = "D") +
+  scale_fill_viridis_d(option = "D") +
+  
+  theme_set(theme_classic())+
+  theme(legend.position = "right")  # Adjust legend position if needed
+
+GSD_CI_Plot
+
+# Export a figure
+export_plot(GSD_CI_Plot, "Cumulative_Freq_Curves_by_year.pdf")
+
+
+
+```
+
+If the confidence intervals do not overlap, a rule of thumb is that the estimates are likely significantly different at the confidence level used to compute the intervals (e.g., 95%). Conversely, if a percentile estimate (e.g.,$D_{50}$) from one sample falls within the confidence interval of the other sample, we cannot reject the null hypothesis that the percentile values are the same. 
+
+#### Comparison with Benchmarks - Incubation and Emergence
+
+Remember that we have greater precision for $D_{50}$ values (the median particle diameter) than we can have toward the tails of the distribution due to our sample size. However if salmonid spawning is of interest, it might still be useful to look into patterns that you see toward the smaller end of the distribution. In particular, if there is an excessive or increasing amount of fine particles, you might wish to compare this with benchmark values reported for incubation and emergence (look at the proportion finer than 3, 6, or 10 mm, species-dependent). See Jensen et al 2009, Levy and Slaney 1993, and others.
+
+As a rule of thumb based on _Figure 13.18_ in Kondolf et al 2003: if the proportion of surface substrate finer than 1 mm is 0.22 or greater, successful spawning is not anticipated (which you would have probably already noted in the field). With a pebble count, which samples the surface of the gravels, it is simply not possible to ascertain whether subsurface particle sizes are suitable for incubation or emergence. That is, we can confidently say when they are unsuitable, but because there are greater proportions of fines in the subsurface matrix than at the surface, we cannot identify suitable incubation/emergence conditions without bulk sampling.
+
+### Boxplots by Year 
+
+To aid with comparing multiple distributions, we will also plot the distributions as box-and-whisker plots. This allows us to visualize the characteristics of individual size distributions side-by-side, whilst avoiding overlapping lines.
+
+The rectangle (box) encompasses the middle 50% of the sample (i.e., interquartile range), from the $D_{25}$ (first quartile) to $D_{75}$ (third quartile) values. The median diameter, $D_{50}$, is represented by a horizontal line through the box. The upper whisker extends to the largest value no further than 1.5 times the inter-quartile range (1.5 x IQR), and the lower whisker extends to the smallest value no further than 1.5 x IQR. 
+
+```{r box plots  ,echo=FALSE}
+
+# present size distributions in a box and whisker plot
+
+GSD_Boxplot <- ggplot(PC_data_long, aes(x = Site, y = size, fill = factor(Year))) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6) +  # Boxplot with transparency
+  scale_y_log10() +  # Log scale for size (if needed)
+  annotation_logticks(sides = "l") +  # Logarithmic ticks on bottom (b = bottom, l = left, r = right, t = top)
+  scale_fill_viridis_d(option = "D", name = "Year") +
+  labs(x = "Site", y = "Grain Size (mm)", fill = "Year", color = "Year") + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 20))
+ 
+
+GSD_Boxplot
+
+# Export a figure
+export_plot(GSD_Boxplot, "Boxplot_by_year.pdf")
+
+``` 
+
+### Cumulative frequency _comparing 'before' with 'after'_
+
+We now establish 'before' and 'after' groupings for the years of data you collected. We do this because we want to understand the impacts of restoration actions, hoping that the condition after our restoration will be measurably different from the condition before. To do this we will merge the data from years you specify as before, and merge data from the years you specify as after your restoration actions, and compare the 'before' and 'after' populations. Some important items to note:
+
+- The before/after data and this next plot will differ from the preceding data and plots if you have more than two years of data. If you do not (yet), then this will just be a replicate of the above. However, you must still run the code below to establish the 'before' and 'after' data, which will be used in the inferential test in the next section.
+
+- Consider the choice of before and after years, without consulting the data itself (which could bias your choice). Your before/after year choices should be grounded in your objectives and _a priori_ hypotheses, which might (e.g.) anticipate a time lag between your restoration actions and a change in substrate composition. We recognise that many restoration projects or their impacts may continue over time, perhaps with ongoing stewardship and adaptive management. At the time of writing we do not have code prepared for time-series analyses, but you can still select a subset of years that you consider representative of before and after periods.
+
+- However, once you have confirmed the intended before/after years, you should then take a look at the plots-by-year that we displayed above. If there are notable outlier years, then merging these with 'normal' years as one population might not be valid. It is worth looking into these outliers in more depth, and potentially excluding them from the before or after group.
+
+- The before and after categories should balance (equal number of years before as after), but they need not be consecutive years. For example, you could compare 2024 and 2025 'before' data with 2032 and 2034 'after' data. If you do not have balanced categories (due to data collection, or excluded outliers), be very cautious in interpreting results. You could select only a subset of your years to keep the comparison balanced, but if you do this for more than one set of dates you must account for the multiple comparisons inflating the likelihood of a Type I error (false positive). You must also be very aware of the human tendency to bias: Ensure you are not discounting a potential outlier just because it does not fit your expectations.
+
+Enter your before and after years in the below code:
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2025, 2026) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2027, 2031) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+```{r categorise by before after, echo = FALSE}
+# Categorize years
+PC_data_long <- PC_data_long %>%
+  mutate(Time_Category = case_when(
+    Year %in% before_years ~ "Before",
+    Year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+
+#also remove any sites that do not have before/after data (partial data is useful for visualisation, but can bias tests)
+PC_data_long <- PC_data_long %>%
+  group_by(Site) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  ungroup()
+```
+
+```{r before after distributions plots, echo = FALSE, warning = FALSE}
+#################### first this bit calculates cum freq distributions for the newly-defined before and after populations.
+
+# Calculate cumulative percent finer
+# Split data by site and time (before/after)
+split_data <- split(PC_data_long, list(PC_data_long$Site, PC_data_long$Time_Category), drop = TRUE)
+
+# Apply MakeCFD to each subset using Map()
+results_list <- Map(function(df) {
+  cfd <- MakeCFD(df$size,count=TRUE,increment= 0.5)  # Apply function to 'size' column
+  cfd$Site <- unique(df$Site)  # Add site info
+  cfd$Time_Category <- unique(df$Time_Category)  # Add before after info
+  return(cfd)
+}, split_data)
+
+# Convert list to a single data frame
+results_df <- do.call(rbind, results_list)
+
+# Reset row names
+rownames(results_df) <- NULL
+
+# # View a formatted table (commented out, but still export it)
+# datatable(
+#   results_df %>%
+#     mutate(
+#       `Size class / mm` = size,
+#       `Cumulative proportion` = probs,
+#       `Count` = counts
+#     ) %>%
+#     select(Site, Time_Category, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
+#   rownames = FALSE,
+#   options = list(
+#     scrollX = TRUE,  # Enable horizontal scrolling
+#     scrollY = "500px",  # Set the height of the scrollable window
+#     paging = TRUE
+#   )
+# ) %>%
+#   formatRound(columns = c("Size class / mm", "Cumulative proportion"), digits = 2)  # Round selected columns
+
+# Export the table
+export_table(as.data.frame(results_df), "Cumulative_Proportion_Finer_Than_before_after.csv")
+
+
+###################### next we generate the key percentile table for before/after categories (retain alpha and focal percentiles from before)
+
+# Compute n (sample size) for each Site-Time combo from PC_data_long
+sample_sizes <- PC_data_long %>%
+  group_by(Site, Time_Category) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Split cumulative frequency data (results_df) by Site-Time_Category
+split_data <- split(results_df, list(results_df$Site, results_df$Time_Category))
+
+# Apply WolmanCI to each subset with the correct n (sample size)
+results_list <- map(split_data, ~ {
+  cfd <- data.frame(size = .x$size, probs = .x$probs)
+  
+  # Extract Site and Time for this subset
+  Site <- unique(.x$Site)
+  Time_Category <- unique(.x$Time_Category)
+
+  # Get the correct sample size for this Site-Time_Category
+  my.n <- sample_sizes %>%
+    filter(Site == unique(.x$Site), Time_Category == unique(.x$Time_Category)) %>%
+    pull(n)
+  
+  # Check that correct value is assigned for my.n
+ # print(paste("Processing Site:", Site, "Time Category:", Time_Category, "n:", my.n))
+
+  # Apply WolmanCI with the correct n
+  WolmanCI(cfd, n = my.n, P = my.percentile, alpha = my.alpha)
+})
+
+# Convert list to data frame
+my.Dvalues <- bind_rows(results_list, .id = "Site_Time_Category")
+
+# Separate Site and Time_Category into different columns
+my.Dvalues <- my.Dvalues %>%
+  separate(Site_Time_Category, into = c("Site", "Time_Category"), sep = "\\.", convert = TRUE)
+
+# # Comment out display in R Studio, but still export
+# # View the data
+# datatable(
+#   my.Dvalues,
+#   rownames = FALSE,
+#   options = list(
+#     scrollX = TRUE,  # Enable horizontal scrolling
+#     scrollY = "500px",  # Set the height of the scrollable window
+#     paging = TRUE
+#   )
+# ) %>%
+#   formatRound(columns = c("estimate", "lower", "upper"), digits = 2)  # Round all numeric columns to 2 decimals
+
+# export the table
+export_table(as.data.frame(my.Dvalues), "Percentile_Estimates_and_CIs_before_after.csv")
+
+
+######################## Now here come the before after cum freq figs with CIs 
+
+my.percentiles = seq(from = 10, to = 90, by = 5)
+
+# Apply PolyCI to each subset with the correct n (sample size)
+results_list <- map(split_data, ~ {
+  cfd <- data.frame(size = .x$size, probs = .x$probs)
+  
+  # Extract Site and Time for this subset
+  Site <- unique(.x$Site)
+  Time_Category <- unique(.x$Time_Category)
+
+  # Get the correct sample size for this Site-Time_Category
+  my.n <- sample_sizes %>%
+    filter(Site == unique(.x$Site), Time_Category == unique(.x$Time_Category)) %>%
+    pull(n)
+  
+  # Check that correct value is assigned for my.n
+  # print(paste("Processing Site:", Site, "Time_Category:", Time_Category, "n:", my.n))
+
+  # Apply PolyCI with the correct n
+  as.data.frame(PolyCI(cfd, n = my.n, P = my.percentiles, alpha = my.alpha))
+})
+
+# Convert list to data frame
+my.polygon <- bind_rows(results_list, .id = "Site_Time_Category")
+
+# Separate Site and Year into different columns
+my.polygon <- my.polygon %>%
+  separate(Site_Time_Category, into = c("Site", "Time_Category"), sep = "\\.", convert = TRUE)
+
+
+
+## Create faceted plot
+
+GSD_CI_Plot <- ggplot() +
+  # Add the confidence interval polygon (shaded region)
+  geom_polygon(data = my.polygon, 
+               aes(x = x.poly, y = y.poly, group = interaction(Site, Time_Category), fill = factor(Time_Category)), 
+               alpha = 0.3) +  # Adjust transparency
+  
+  # Add the cumulative frequency curves
+  geom_line(data = results_df, 
+            aes(x = size, y = probs, color = factor(Time_Category), group = interaction(Site, Time_Category)), 
+            linewidth = 1) +
+  geom_point(data = results_df, 
+            aes(x = size, y = probs, color = factor(Time_Category), group = interaction(Site, Time_Category)), shape=1, size = 2) +
+  geom_hline(yintercept = c(0.1, 0.9), linetype = "dashed", color = "black") + # add lines indicating range of confidence interval
+  
+  # Facet by Site for separate plots
+  facet_wrap(~ Site, labeller = label_wrap_gen(width = 15)) +  # Wrap long titles and Facet by Site
+  
+  # Axis labels and theme
+  scale_x_log10() +  # Log scale for grain size
+  annotation_logticks(sides = "b") +  # Logarithmic ticks on bottom (b = bottom, l = left, r = right, t = top)
+  labs(x = "Grain Size (mm)", y = "Proportion Finer", 
+       color = "Time_Category", fill = "Time_Category") +
+  
+  # Use good contrasts that differ from the plot by year
+  scale_color_manual(values = c("#56B4E9", "#D55E00")) +  # Blue & Orange (colorblind-friendly)
+  scale_fill_manual(values = c("#56B4E9", "#D55E00"))+
+  
+  theme_set(theme_classic())+
+  theme(legend.position = "right")  # Adjust legend position if needed
+
+GSD_CI_Plot
+
+# Export a figure
+export_plot(GSD_CI_Plot, "Cumulative_Freq_Curves_before_after.pdf")
+
+
+
+
+```
+
+As before, if the confidence intervals do not overlap, a rule of thumb is that the estimates are likely significantly different at the confidence level used to compute the intervals (e.g., 95%). However, in many cases it may not be clear whether the substrate populations are distinct: they may overlap partially, in certain parts of the distribution more than others, etc. This is where inferential statistical tests can be helpful. Below we will implement the two-sample bootstrap resampling tests provided by Eaton et al (2019).
+
+## Two-Sample Inferential Tests
+
+Here we are asking whether the differences between two samples can be attributed to chance, or whether they can be considered statistically significant. We will use `CompareRAWs` (Eaton et al. 2019) which uses the b-axis diameters for every particle and resamples with replacement to generate confidence intervals. Note that they also provide an alternative approach if you collected binned data in the field (e.g. using a gravelometer). Since this statistical method may be unfamiliar, we provide the below excerpt from Eaton et al (2019) describing the steps:
+
+<div style="border:1px solid black; padding:10px; background-color:#f9f9f9;">
+ 
+
+$X_i$ represents b-axis diameters measured in Sample 1, where $_i$ ranges from 1 to $n_{x}$ and $n_{x}$ is the number of grains in Sample 1.
+
+$Y_j$ represents b-axis diameters measured in Sample 2, where $_j$ ranges from 1 to $n_{y}$ and $n_{y}$ is the number of grains in Sample 2.
+
+1. Take a random sample $x$, which comprises a bootstrap sample of $n_{x}$ diameters, with replacement, from the set of values of $X_i$. The order statistics for the bootstrap sample are denoted as $x_{(k)}$, k = 1 to $n_{x}$. 
+
+2. Take a random sample $y$, which comprises a bootstrap sample of $n_{y}$ diameters, with replacement, from the set of values of $Y_j$. The order statistics for the bootstrap sample are denoted as $y_{(l)}$, l = 1 to $n_{y}$.
+
+3. Determine the desired percentile value from each bootstrap sample, $(dp)_x$ and $(dp)_y$, and compute the difference, $\Delta dp$ = $(dp)_x$ - $(dp)_y$.
+
+4. Repeat steps 1 to 3 $n_r$ times (e.g., $n_r$ = 1000), each time storing the value of $\Delta dp$.
+
+5. Determine a confidence interval for $\Delta dp$ by computing the quantiles corresponding to $\alpha$/2 and 1-$\alpha$/2, where $\alpha$ is the desired significance level for the test (e.g., $\alpha$ = 0.05).
+
+6. If the confidence interval determined in Step 5 does not overlap 0, then we can reject the null hypothesis that the sampled populations have the same value of $D_P$. </div>
+
+
+
+Before running the test, you should remind yourself of your _a priori_ hypotheses and predictions, and consider which percentile is of interest to you. Our default is $D_{50}$, because of the level of precision available with sample sizes of ~100, and because of the familiarity and interpretability of the median. However, different percentiles can be chosen through simple amendments of the code, and if you understand the implications of multiple comparisons and the risk of _post-hoc_ justifications, you can generate tests of every percentile simultaneously. It is also possible to adjust the alpha (p-value) from the default of 0.05.
+
+```{r Comparing two distributions, echo=FALSE}
+
+# Split data by site
+split_data <- split(PC_data_long, PC_data_long$Site)
+
+# Apply CompareRaws for each site
+results_list <- map(split_data, ~ {
+  site_name <- unique(.x$Site)
+  
+  sample_1 <- .x %>%
+    filter(Time_Category == 'Before') %>%
+    pull(size)
+  
+  sample_2 <- .x %>%
+    filter(Time_Category == 'After') %>%
+    pull(size)
+  
+  # Only compare if both samples have data
+  if (length(sample_1) > 0 & length(sample_2) > 0) {
+    result <- CompareRAWs(sample_1, sample_2, P=50, alpha = 0.05)  #  Can alter P (percentile) to value(s) of interest. P = seq(5, 95, 5) would compare from 5th to 95th percentiles in increments of 5. Can alter alpha (significance level)
+    result$Site <- site_name  # Store site name for reference
+    return(result)
+  } else {
+    return(NULL)  # Skip if no data for either period
+  }
+})
+
+# Convert results to a data frame
+results <- bind_rows(results_list)
+
+print(results)
+
+# Exporting a summary
+
+ write.csv(results, file = "Inferential_Test_Two_Sample.csv", row.names = FALSE)
+
+```
+
+The above table indicates the percentile chosen, the value of that percentile in sample 1 (before) and sample 2 (after), and indicates whether there is a statistically significant difference (TRUE or FALSE) for that percentile.
+
+# Interpretation
+
+By this point, you have visualisations of the pebble count data structured by year and structured as 'before vs after' the restoration action. You also have the results of a statistical test. It is over to your expertise and that of your partners to interpret what this all means, taking all of these outputs together. 
+
+It is worth noting that, with this approach, we do not have an inferential test that includes an 'interaction' term. As such, we cannot directly assess whether any changes at the restoration site over time are distinct from changes at the control site over time (only that each of these changes was or was not a real change in particle size distributions). In cases where a restoration site and a control site both change in the direction that you hypothesized would result from your restoration action, we recommend considering any differences in magnitude of the changes, the shapes of the distribution, and the yearly variability (if several years of data are available). Differences in these features may help to partition the observed change between background variability and your restoration actions.
+
+Once you have grasped the information about the changes (or absence of such) in particle sizes, move onto considering the biological and/or morphological significance and the implications for your project. Consider any benchmarks that you can refer to: If salmonid spawning was your focus, did the particle distributions return to a range that fish are known to use? And consider what any directional change implies: Is the relative change in median particle size indicative of a successful attempt to mitigate peak flows in the system?
+
+Although we consider interpretation the hardest step, and we leave it entirely to you, we hope that our support in visualising and exploring your data has been helpful. Keep up the good work!
+
+# References
+
+Eaton, B. C., Moore, R.D, & Mackenzie, L. G. (2019). Percentile-based grain size distribution analysis tools (GSDtools)-Estimating confidence limits and hypothesis tests for comparing two samples. Earth Surface Dynamics, 7(3), 789–806. https://doi.org/10.5194/esurf-7-789-2019
+
+Eaton, B. C. and Moore, R. D.: GSDtools: analyse and compare river bed surface grain size distributions (R Package), Zenodo, https://doi.org/10.5281/zenodo.3229387, 201
+
+Jensen D.W., Steel E.A., Fullerton A.H., Pess G.R. (2009). Impact of fine sediment on egg-to-fry survival of Pacific salmon: a meta-analysis of published studies. Reviews in Fisheries Science 17: 348–359. DOI:10.1080/10641260902716954.
+
+Kondolf, G.M. (2000). Assessing salmonid spawning gravels. Transactions of the American Fisheries Society 129: 262-281.
+
+Kondolf, G.M., Lisle, T.E., & Wolman, G.M. (2003). Bed sediment measurement. Tools in fluvial geomorphology, 347, p.395.
+
+Levy, D. A., & Slaney, T. L. (1993). A review of habitat capacity for salmon spawning and rearing. Resources Inventory Committee.
+
+Overstreet, B. T., C. S. Riebe, J. K. Wooster, L. S. Sklar, and D. Bellugi (2016), Tools for gauging the capacity of salmon spawning substrates, Earth Surf. Process. Landforms, 41(1), 130–142, doi:10.1002/esp.3831
+
+Riebe, C. S., L. S. Sklar, B. T. Overstreet, and J. K. Wooster (2014), Optimal reproduction in salmon spawning substrates linked to grain size and fish length, Water Resour. Res., 50, 898–918, doi:10.1002/2013wr014231.
+
