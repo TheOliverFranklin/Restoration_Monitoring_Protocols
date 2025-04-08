@@ -156,7 +156,7 @@ if (interactive()) {
   }
 } else {
   # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/StreamCanopy"
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/StreamCanopy"
   if (!dir.exists(output_folder)) {
     dir.create(output_folder, recursive = TRUE)
     message("Default output folder created: ", output_folder)
@@ -182,7 +182,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "~/Git/Core Monitoring/standardised protocols/data_raw/Stream Canopy/to_combine"
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Stream Canopy/to_combine"
 ```
 
 ```{r combine csv input files, echo=FALSE}

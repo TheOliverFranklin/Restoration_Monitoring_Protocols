@@ -1,0 +1,2349 @@
+---
+title: "Longitudinal Survey 3 Residual Pools"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=9, echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(DT, tidyverse, dplyr, tidyr, ggplot2, knitr, kableExtra, gridExtra, cowplot, car, moments, plotly, htmltools, htmlwidgets, tibble, betareg, update=F)
+```
+
+```{r export functions and folder, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+
+# below code to confirm an output folder is already specified, OR will request it is specified in R (interactively via readline)
+# BUT if you want to knit, you will need to specify a default location (within the 'else' term)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+In this script we estimate residual pool characteristics. The residual pool is the pool that would form if streamflow were to decrease to zero. Its depth is characterised as the elevation difference between the pool's deepest point and the pool outlet / riffle crest that controls the flow of water out of the pool. It serves as a flow-independent metric of pools in a stream and, with several assumptions, we can estimate the depths, areas, and volumes of residual pools based on our field data. See Lisle (1989) for more background on the concept of residual depths.
+
+We tried to make field data collection as simple as possible by relying on water depths rather than elevations for our longitudinal profiles, so that people could collect data without survey equipment - reducing the cost and expertise required, and facilitating assessment in densely vegetated / woody coastal streams, highly incised channels etc. The use of simple depth data requires a couple of extra processing steps compared with using elevation data, but luckily some rather clever individuals have already figured it out. 
+
+The code we use here is adapted from the 'Rapid Bed Profile' approach from Stack (1989), with additional guidance from Kaufman et al. (1999), and we adopt Stack's slope factor. The slope factor was developed in coastal streams but has been applied successfully in a variety of other systems. If you have the resources, the accuracy of the slope factor for your particular system can be tested by comparing water-depth-derived to elevation-derived residual pool data. However, even if this assumption is untested (as it will be in most cases), the resulting metrics remain valid for assessing changes within a system, as long as you don't change the slope factor between years or reaches in your comparison.
+
+# Data import
+
+First we will import the tidied dataframe generated by the Data Wrangling script, which was exported to your output folder. This file has longitudinal thalweg water depth data that includes both regular predetermined spacing and any 'extra' pool outlets and max pool depths encountered ('XPO', 'XD'). We proposed that the 'extra' measurements were taken in the field, in order to capture the depth minima (potential pool outlets) and maxima (deepest pool sections) that might occur between regular intervals.
+
+```{r import data, echo=FALSE}
+importeddata <- file.path(output_folder, "Long_dataframe.csv")
+df <- read.csv(importeddata)  
+
+## if you need to specify a different location to import from, use below code:
+# importeddata<-read.csv("~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal/Long_dataframe.csv") # specify your file location & name here
+# df<-data.frame(importeddata)
+```
+
+In this code we will require some additional constants that we ask you to define in the code below based on data you recorded in the field (or are able to estimate). This is done by creating a dataframe/table, for which you must enter the following:
+
+- names of each channel
+- the years data were collected
+- the standard interval spacing (in metres) for each reach and each year
+- the average reach slope (0.5 = 0.5%, not 50%) for each reach and each year
+- the average wetted width during low flow (in metres) for each reach and each year.
+
+Enter this information in the code below. Data is entered in vectors of equal length and following the same sequence. For example, in the existing code, Hatchery Channel is associated with spacing of 1 and 1, slope of 1 and 1.1, and wetted width of 6.8 and 7.0, for 2024 and 2025 respectively.
+Once you create the dataframe with your data, check through the table to ensure these constants are assigned to the correct reach & year.
+
+``` {r input constants}
+# Create a data frame to hold constants for multiple sites and years. Enter your data below:
+constants_df <- data.frame(
+  Site = c("Hatchery Channel", "Hatchery Channel", "Brousseau Channel", "Brousseau Channel"),  # Edit / Add your site names
+  year = c(2024, 2025, 2024, 2025),  # Corresponding years for each site
+  spacing = c(1, 1, 1, 1),  # spacing values for each site-year combination
+  Slope = c(0.5, 0.6, 0.5, 0.5),    # Slope values for each site-year combination, in %
+  WetWidth = c(6.8, 7.0, 6.5, 7.1)  # Average wetted width in m, for each site-year combination
+)
+
+# View the constants data frame
+print(constants_df)
+```
+
+```{r constant extract function, echo = FALSE}
+# Function to get constants for a specific Site and year
+get_constants <- function(site, year) {
+  constants_row <- constants_df[constants_df$Site == site & constants_df$year == year, ]
+  
+  if (nrow(constants_row) == 0) {
+    stop(paste("No constants found for Site:", site, "year:", year))
+  }
+    
+  # Extract constants
+  spacing <- constants_row$spacing
+  slope <- constants_row$Slope
+  wetwidth <- constants_row$WetWidth
+  
+  return(list(spacing = spacing, slope = slope, wetwidth = wetwidth))
+}
+```
+
+# Creation of Residual Surfaces
+
+```{r create artificial nickpoints, echo = FALSE}
+# Although we recommended starting the longitudinal field survey downstream at a pool outlet / riffle crest, this is not always possible. This code creates artificial downstream nick points that will allow us to include areas of pool at the bottom of our reaches that were not contained by an outlet.
+
+# Identify unique sites and years in the data
+unique_sites_years <- unique(df[, c("Site", "year")])
+
+# Initialize an empty list to store artificial rows
+artificial_rows <- list()
+
+# Loop through each unique combination of Site and year
+for (i in 1:nrow(unique_sites_years)) {
+  site <- unique_sites_years$Site[i]
+  year <- unique_sites_years$year[i]
+  
+  # Subset the data for the current site and year
+  site_year_data <- subset(df, Site == site & year == year)
+  
+  # Calculate mean and standard deviation of Thalweg_Depth_m for the current subset
+  thalweg_mean <- mean(site_year_data$Thalweg_Depth_m, na.rm = TRUE)
+  thalweg_sd <- sd(site_year_data$Thalweg_Depth_m, na.rm = TRUE)
+  
+# Retrieve the correct spacing value from constants_df for this site and year
+spacing_value <- constants_df %>%
+  filter(Site == site & year == year) %>%
+  distinct(spacing) %>%  # Ensure unique spacing values
+  pull(spacing)  # Extract the spacing value for the current site-year combination
+
+# Check if the spacing value is valid (length should be exactly 1). This is here because we encountered issues with duplicates; retaining it in case you run into a similar error
+if (length(spacing_value) != 1) {
+  stop(paste("There is an issue with the spacing value for Site:", site, "and Year:", year, 
+             "- expected one value but found", length(spacing_value), "values"))
+}
+  # Create a new row with NA values for all columns
+  new_row <- site_year_data[1, ]  # Use the first row as a template
+  new_row[] <- NA  # Replace all values with NA
+  
+  # Provide values for the nick point new row, only where values are needed
+  new_row$Location_Code <- "nickpts"
+  new_row$Thalweg_Depth_m <- thalweg_mean - thalweg_sd
+  new_row$distance <- -1 * spacing_value  # Use the spacing value for distance, assign it negative to later filter out
+  new_row$Fines <- "N"  # Define these rows to plot them properly later
+  new_row$floatveg <- 0 
+  new_row$subveg <- 0
+  new_row$emergveg <- 0
+  new_row$Site <- site
+  new_row$year <- year  
+  
+  # Add the new row to the list of artificial rows
+  artificial_rows[[i]] <- new_row
+}
+
+# Combine all artificial rows and the original data
+df_artificial <- do.call(rbind, artificial_rows)
+df <- rbind(df_artificial, df)
+```
+The residual surface is the water surface at the point when streamflow approaches zero, and residual depth is the vertical distance between the residual surface and the stream bed. As such, when we estimate residual pools and residual depths, these are features that are independent of flow conditions at the time of the field survey. While they might be representative of actual pool conditions during times of very low flow, their value lies with the ability to make comparisons of pool habitat among years and/or reaches without quantifying and controlling for variable flow conditions. 
+
+Our code uses the sequence of thalweg depth measurements to identify potential pool outlets in the sampled reach, and estimates residual depths at each measurement location based on a projected residual surface that extends upstream from each pool outlet. The residual surface is projected using the expected pool water surface slope (which is estimated using Stack's empirical equation, incorporating the average reach slope that you entered as a constant). 
+
+It is important to note that when we identify pool outlets or riffle crests (either in the field or using this code), we usually base this determination on the bed elevation and/or water depth at the current location compared with the areas immediately adjacent. However, a potential pool outlet will not 'behave' as a pool outlet under all flow conditions: it could be high and dry under very low flow conditions, or it could itself be within a pool due to the backwatering effects of a higher-elevation pool outlet downstream. From here onward, we will use the term *'local depth minima'* ('LDM' in code) to refer to locations that have the potential to be pool outlets - that is, they are less deep than areas immediately downstream and upstream, accounting for the slope of the stream. We will reserve the term 'pool outlet' for cases when local depth minima would be expected to actually backwater a pool under flow conditions approaching zero. 
+
+At this point our code will generate a new dataframe (residuals.df) with the local depth minima identified and the residual surface projected. If you are interested in how this is done, check out the R code. For everyone else, here are some fish: 
+
+🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟 🐟🐟🐟🐟🐟
+
+```{r residual surfaces and depths, echo = FALSE}
+# NB: we have modified the approach used in Kaufman et al. 1999 to account for the fact that we measured the maximum depth of pools
+# and the depth of pool outlets *wherever we encountered them* along our sampled reach (not just at predetermined intervals).
+# As such, we base our residual pool calculations on differences in the distance column that we previously computed.
+
+# Merge constants_df with df to add the slope and wetwidth values
+df <- df %>%
+  left_join(constants_df, by = c("Site", "year"))
+
+# Residual depth function to create residuals.df (instead of modifying df)
+calculate_residual_depths <- function(df) {
+  # Ensure the dataframe is sorted by distance, so that calculations progress in correct order
+  df <- df[order(df$distance), ]
+  
+  # Initialize required columns
+  residuals.df <- df # Start with a copy of the input dataframe
+  residuals.df$residual_surface <- NA
+  residuals.df$residual_depth <- NA
+  residuals.df$residual_width <- NA
+  residuals.df$LDM_id <- NA
+  
+  # Define constants (slope factor adjustment for percentage. Formula from Stack 1989)
+  slope_factor <- (0.12 + 0.25 * residuals.df$Slope[1]) / 100
+  wetwidth <- residuals.df$WetWidth[1]
+  
+  # Identify local depth minima (riffle crests/control points/pool outlets)
+  LDM_id <- 0 
+  last_residual_surface <- NA
+  last_residual_index <- 0.1
+  
+  # Handle artificial outlet (negative distance value)
+  if (residuals.df$distance[1] < 0) {
+    LDM_id <- LDM_id + 1
+    downstream_depth <- residuals.df$Thalweg_Depth_m[1]
+    downstream_index <- 1
+    residuals.df$LDM_id[1] <- LDM_id
+    
+    # Project residual surface upstream from the artificial outlet
+    for (e in 1:nrow(residuals.df)) {
+      spacing_current <- residuals.df$distance[e] - residuals.df$distance[1]
+      residual_surface <- downstream_depth + slope_factor * spacing_current
+
+      if (!is.na(residuals.df$Thalweg_Depth_m[e])) {
+        if (residual_surface <= residuals.df$Thalweg_Depth_m[e]) {
+          residuals.df$residual_surface[e] <- residual_surface
+          residuals.df$residual_depth[e] <- residuals.df$Thalweg_Depth_m[e] - residual_surface
+        } else {
+          residuals.df$residual_surface[e] <- residuals.df$Thalweg_Depth_m[e]
+          residuals.df$residual_depth[e] <- 0
+          break
+        }
+      } else {
+        break
+      }
+    }
+  }
+
+  # Iterate through the rest of the rows to identify local depth minima
+  for (b in 2:(nrow(residuals.df) - 1)) {
+    spacing_prev <- residuals.df$distance[b] - residuals.df$distance[b - 1]
+    spacing_next <- residuals.df$distance[b + 1] - residuals.df$distance[b]
+    
+    # Check if the current point is a local depth minimum
+    if ((residuals.df$Thalweg_Depth_m[b] <= (residuals.df$Thalweg_Depth_m[b - 1] + slope_factor * spacing_prev) &&
+         (residuals.df$Thalweg_Depth_m[b] + slope_factor * spacing_next) < residuals.df$Thalweg_Depth_m[b + 1]) ||
+        residuals.df$distance[b] < 0) {
+      
+      LDM_id <- LDM_id + 1
+      downstream_depth <- residuals.df$Thalweg_Depth_m[b]
+      downstream_index <- b
+      residuals.df$LDM_id[b] <- LDM_id
+
+      if (is.na(last_residual_surface) || residuals.df$distance[b] > residuals.df$distance[last_residual_index]) {
+        if (is.na(last_residual_surface)) {
+          projected_residual_surface <- residuals.df$residual_surface[b - 1] + slope_factor * (residuals.df$distance[b] - residuals.df$distance[b - 1])
+        } else {
+          projected_residual_surface <- last_residual_surface + slope_factor * (residuals.df$distance[b] - residuals.df$distance[last_residual_index])
+        }
+
+        if (downstream_depth <= projected_residual_surface) {
+          last_residual_surface <- downstream_depth
+          last_residual_index <- b
+        } else {
+          next
+        }
+      }
+      
+      for (e in (last_residual_index + 1):nrow(residuals.df)) {
+        spacing_current <- residuals.df$distance[e] - residuals.df$distance[last_residual_index]
+        residual_surface <- last_residual_surface + slope_factor * spacing_current
+
+        if (!is.na(residuals.df$Thalweg_Depth_m[e]) && !is.na(residual_surface)) {
+          if (residual_surface > residuals.df$Thalweg_Depth_m[e]) {
+            residuals.df$residual_surface[e] <- residuals.df$Thalweg_Depth_m[e]
+            residuals.df$residual_depth[e] <- 0
+            last_residual_surface <- residuals.df$Thalweg_Depth_m[e]
+            last_residual_index <- e
+            break
+          } else {
+            residuals.df$residual_surface[e] <- residual_surface
+            residual_depth <- residuals.df$Thalweg_Depth_m[e] - residual_surface
+            residuals.df$residual_depth[e] <- ifelse(residual_depth > 0, residual_depth, 0)
+            last_residual_surface <- residual_surface
+            last_residual_index <- e
+          }
+        }
+      }
+    }
+  }
+  
+# this bit estimates the width of the channel when flow approaches zero (the residual width) by using the ratio of residual depths to observed depths
+  residuals.df$residual_width <- ifelse(
+    is.na(residuals.df$residual_depth) | is.na(residuals.df$Thalweg_Depth_m) | residuals.df$Thalweg_Depth_m == 0,
+    NA,
+    wetwidth * (residuals.df$residual_depth / residuals.df$Thalweg_Depth_m)
+  )
+  
+  return(residuals.df)
+}
+
+# Now we will apply this function across all sites and years
+# Group by Site and Year, and apply the calculate_residual_depths function
+residuals.df <- df %>%
+  group_by(Site, year) %>%
+  do(calculate_residual_depths(.)) %>%
+  ungroup()
+```
+
+Below we generate a quick visual of the depths and residual surfaces that were projected by the code. Take a look to ensure it matches your understanding of residual pools and look for potential errors (the figure is interactive, so zoom in if you have several plots). Try to identify some local depth minima that are within a pool (if present in your data), and compare these to the local depth minima that act as pool outlets - the shallower features at which residual surfaces begin. Remember that the residual surface slopes down in these figures as you progress upstream (right in the plots), which is to compensate for the fact that the true thalweg surface slopes down as you progress downstream.
+
+```{r visualise residual surfaces, echo = FALSE}
+# Ensure 'year' is ordered from oldest to youngest
+residuals.df$year <- factor(residuals.df$year, levels = sort(unique(residuals.df$year), decreasing = FALSE))
+
+gg<- ggplot(residuals.df, aes(x = distance)) +
+  # Plot Thalweg Depth as a line
+  geom_line(aes(y = -Thalweg_Depth_m), color = "black", linewidth = 1, linetype = "solid") +
+  
+  # Plot Residual Surface as points (instead of line, which would 'jump' up at upstream of some pools)
+  geom_point(aes(y = -residual_surface), color = "blue", size = 1) +
+  
+  # Add labels and title
+  labs(x = "Distance (m)", y = "Depth (m)", title = "Thalweg Depth and Residual Surface") +
+  
+  # Flip the y-axis to match the inverted lines
+   scale_y_continuous(
+    name = "Depth (m)", 
+    breaks = seq(-max(residuals.df$Thalweg_Depth_m, na.rm = TRUE), 0, by = 0.2),  
+    labels = scales::number_format(accuracy = 0.2, big.mark = "", decimal.mark = ".")(
+      abs(seq(-max(residuals.df$Thalweg_Depth_m, na.rm = TRUE), 0, by = 0.2))
+    )  # Convert to positive for labels and ensure accuracy of 2 decimals
+  ) +
+  
+  # Customize theme
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(color = "black"),
+    axis.title.y = element_text(color = "black"),
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(size = 8, face = "bold")
+  ) +
+  
+  # Use facet_grid to arrange by Site (rows) and Year (columns)
+  facet_grid(Site ~ year, scales = "fixed") +  # Rows = Site, Columns = Year (oldest on left)
+  
+  # Customize grid spacing if necessary
+  theme(
+    strip.text.y = element_text(angle =90),  
+    panel.spacing = unit(1, "lines")  # Adjust space between panels
+  )
+interactive_plot <- ggplotly(gg)
+interactive_plot
+
+# Export a figure (commented out in favour of below figure)
+# export_plot(gg, "Thalweg Water Depth and Residual Surface.pdf")
+# export_plot(interactive_plot, "Thalweg Water Depth and Residual Surface.html")
+```
+
+# 'Meaningful' Pools
+
+Consider the vertical exaggeration of the above figure - some 'pools' may be very shallow indeed, and might not necessarily correspond with what you would actually consider a pool in a stream. 
+
+It is probably most informative to consider metrics relating only to those pools that are expected to be hydraulically and/or biologically meaningful. The code now detects pools and assigns each a pool ID, so that we can characterise them individually and select subsets as appropriate.
+
+```{r ID actual pools, echo = FALSE}
+identify_residual_pools <- function(df) {
+  # Initialize the pool ID column
+  df$pool_id <- as.character(NA)  # Default is NA (not in a pool)
+  
+  # Variables to track pool status
+  pool_id <- 0
+  in_pool <- FALSE  # Whether we are currently inside a pool
+  
+  # Iterate through rows to identify pools
+  for (i in 1:nrow(df)) {
+    # Check if the current row starts a new pool
+    if (!in_pool && !is.na(df$LDM_id[i])) {
+      pool_id <- pool_id + 1  # Increment pool ID
+      in_pool <- TRUE  # Enter a pool
+      df$pool_id[i] <- pool_id  # Assign the new pool ID to this row
+      next  # Skip to the next iteration to avoid further logic for this row
+    }
+    
+    # If already in a pool, assign the pool ID
+    if (in_pool) {
+      df$pool_id[i] <- pool_id  # Continue assigning the current pool ID
+      
+      # Check if the current row ends the pool
+      if (!is.na(df$residual_depth[i]) && df$residual_depth[i] <= 0) {
+        if (!is.na(df$LDM_id[i])) {
+          # If the current row is a LDM, start a new pool
+          pool_id <- pool_id + 1
+          df$pool_id[i] <- pool_id  # Assign the new pool ID
+          # Continue in_pool = TRUE since a new pool starts
+        } else {
+          # If the current row is NOT an LDM, end the pool
+          in_pool <- FALSE  # Exit the pool
+        }
+      }
+    }
+  }
+  
+  return(df)
+}
+
+# Apply the function across all Site-Year combinations
+residuals.df <- residuals.df %>%
+  group_by(Site, year) %>%
+  do(identify_residual_pools(.)) %>%
+  ungroup()
+
+# Ensure pool_id is a factor with numeric ordering
+residuals.df$pool_id <- factor(residuals.df$pool_id, levels = as.character(sort(as.numeric(unique(residuals.df$pool_id)))))
+
+# Custom palette with more distinct colors (priority is to ID pools from adjacent ones)
+custom_palette <- c(
+  "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33", "#A65628", "#F781BF", "#999999", "#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3", "#A6D854", "#FFD92F",   "#E5C494", "#B3B3B3", "#1B9E77", "#D95F02")
+
+gg<-ggplot(residuals.df, aes(x = distance)) +
+  geom_line(aes(y = -Thalweg_Depth_m), color = "black", linewidth = 1, linetype = "solid") +
+  geom_point(aes(y = -residual_surface), color = "blue", size = 1) +
+  geom_ribbon(aes(ymin = -Thalweg_Depth_m, ymax = -residual_surface, fill = pool_id), alpha = 0.6) +
+  labs(x = "Distance (m)", y = "Depth (m)", title = "Residual Pools", fill = "Pool ID") +
+  scale_y_continuous(
+    name = "Depth (m)", 
+    breaks = seq(-max(residuals.df$Thalweg_Depth_m, na.rm = TRUE), 0, by = 0.2),
+    labels = scales::number_format(accuracy = 0.2, big.mark = "", decimal.mark = ".")(
+      abs(seq(-max(residuals.df$Thalweg_Depth_m, na.rm = TRUE), 0, by = 0.2))
+    )
+  ) +
+  scale_fill_manual(values = custom_palette) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(color = "black"),
+    axis.title.y = element_text(color = "black"),
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(size = 8, face = "bold"),
+    legend.position = "right"
+  ) +
+  facet_grid(Site ~ year, scales = "fixed")
+
+interactive_plot <- ggplotly(gg)
+interactive_plot
+
+# Export a figure
+export_plot(gg, "Depth and Residual Surface - Pools IDd.pdf")
+export_plot(interactive_plot, "Depth and Residual Surface - Pools IDd.html")
+```
+
+The above figure should show a series of distinct pools and is exported to your output folder. Don't worry if the shading cuts off before the pool's upstream extent, this is just an artefact associated with my limited figure-plotting abilities. The important thing to note is that the calculations below will integrate the full area beneath the residual surface for each pool.
+
+## Pool Metrics
+
+The code now calculates the following metrics for each residual pool:
+
+- Maximum depth;
+
+- Pool length (pool outlet to where the residual surface meets the thalweg at the upstream end of the pool); and
+
+- Sagittal area.
+
+Sagittal refers to a plane that divides a body into left and right, so imagine a two-dimensional vertical screen extending downstream all along the thalweg, separating river left from river right. Within each residual pool, the sagittal area corresponds to the surface area of that screen. Too abstract? Take a look at the above figure again: Each of the shaded areas corresponds to the sagittal area for that particular residual pool - sagittal area integrates each depth measurement over the length of the pool. Although this may not be as intuitive as pool volume, it requires fewer assumptions than will be necessary to generate estimates of pool volume (i.e., regarding cross-sectional channel shape of pools at zero flow, wetted widths). Because fewer assumptions are required, and because it easily corresponds to 2D visualisations like the one above, we recommend using sagittal area rather than volume for a metric tracking changes in pool habitat (though we will also calculate volume later).
+
+```{r sagittal area, max depths, pool lengths, echo = FALSE}
+create_pool_summary_table <- function(residuals.df, custom_depth_threshold = NULL) {
+  # Remove rows with negative distance values
+  residuals.df <- residuals.df[residuals.df$distance >= 0, ]
+  
+  # Ensure the dataframe is sorted by distance
+  residuals.df <- residuals.df[order(residuals.df$distance), ]
+  
+  # Filter out rows where pool_id is NA
+  residuals.df <- residuals.df[!is.na(residuals.df$pool_id), ]
+  
+  # Initialize a list to store results for each site-year combination
+  pool_summary_list <- list()
+
+  # Group the dataframe by Site and Year
+  residuals.df_grouped <- split(residuals.df, list(residuals.df$Site, residuals.df$year))
+  
+  # Iterate over each Site-Year group
+  for (group_name in names(residuals.df_grouped)) {
+    group <- residuals.df_grouped[[group_name]]
+    
+    # Calculate the standard deviation of residual depths for this group
+    sd_residual_depth <- sd(group$residual_depth, na.rm = TRUE)
+    
+    # Initialize a list to store results for each pool in the current group
+    pool_summary <- list()
+    
+    # Iterate over unique pool_ids to calculate max residual depth and sagittal area for each pool
+    unique_pool_ids <- unique(group$pool_id)
+    for (pool_id in unique_pool_ids) {
+      # Subset the dataframe for the current pool
+      pool_data <- group[group$pool_id == pool_id, ]
+      
+      # Calculate the maximum residual depth for the pool
+      max_residual_depth <- max(pool_data$residual_depth, na.rm = TRUE)
+      
+      # Apply selection criteria: either the max residual depth is >= sd or the custom threshold is met
+      if (!is.null(custom_depth_threshold)) {
+        # Use the custom depth threshold for selection
+        if (max_residual_depth < custom_depth_threshold) {
+          next  # Skip this pool if it doesn't meet the custom threshold
+        }
+      } else {
+        # Use the standard deviation of the group for selection if no custom threshold is provided
+        if (max_residual_depth < sd_residual_depth) {
+          next  # Skip this pool if it doesn't meet the SD threshold
+        }
+      }
+      
+      # Initialize variable to accumulate area for this pool
+      sagittal_area <- 0
+      
+      # Iterate through the dataframe for this pool and calculate the area
+      for (i in 1:(nrow(pool_data) - 1)) {  # loop to avoid out-of-bounds index
+        residual_depth <- pool_data$residual_depth[i]
+        
+        # Skip the iteration if residual depth is NA 
+        if (is.na(residual_depth)) {
+          next  # Skip to the next iteration if residual depth is NA
+        }
+        
+        # Calculate the spacing (distance) between the current and following points
+        spacing <- abs(pool_data$distance[i + 1] - pool_data$distance[i])
+        
+        # Add to the area if residual depth is greater than 0
+        sagittal_area <- sagittal_area + (residual_depth * spacing)
+      }
+      
+      # Handle the last row contribution to sagittal area
+      last_row <- pool_data[nrow(pool_data), ]
+      if (!is.na(last_row$residual_depth) && last_row$residual_depth > 0) {
+        next_pool_start <- group[group$distance > last_row$distance & !is.na(group$pool_id), ]
+        if (nrow(next_pool_start) > 0) {
+          next_distance <- next_pool_start$distance[1]
+          spacing <- abs(next_distance - last_row$distance)
+          sagittal_area <- sagittal_area + (last_row$residual_depth * spacing)
+        }
+      }
+      
+      # Calculate the pool length
+      min_distance <- min(pool_data$distance, na.rm = TRUE)
+      max_distance <- max(pool_data$distance, na.rm = TRUE)
+      pool_length <- ifelse(min_distance < 0, max_distance, max_distance - min_distance)
+      
+      # Store the results for the current pool
+      pool_summary[[as.character(pool_id)]] <- list(max_residual_depth = max_residual_depth,
+                                                    sagittal_area = sagittal_area,
+                                                    pool_length = pool_length)
+    }
+    
+    # Convert the results into a data frame for the current site-year combination
+    pool_summary_df <- data.frame(pool_id = names(pool_summary),
+                                  max_residual_depth = sapply(pool_summary, function(x) x$max_residual_depth),
+                                  sagittal_area = sapply(pool_summary, function(x) x$sagittal_area),
+                                  pool_length = sapply(pool_summary, function(x) x$pool_length),
+                                  Site = unique(group$Site),
+                                  year = unique(group$year))
+    
+    # Append this summary to the main pool_summary_list
+    pool_summary_list[[group_name]] <- pool_summary_df
+  }
+  
+  # Combine all site-year pool summaries into a single dataframe
+  final_pool_summary_df <- do.call(rbind, pool_summary_list)
+  
+  # Add custom_depth_threshold as an attribute to the data frame
+  attr(final_pool_summary_df, "custom_depth_threshold") <- custom_depth_threshold
+  
+  # Return the final summary table
+  return(final_pool_summary_df)
+}
+
+# this is a function. It does not actually produce a new dataframe yet. The next chunk will...
+```
+
+## Subsetting Pools
+
+So far we have identified all of the residual pools, but depending on your dataset some of the pools visualised above might look more like puddles. So to focus our summary statistics on pools that better align with what we consider biologically- and/or geomorphically-meaningful, we can use the metrics we just calculated to focus on a specific subset of deeper pools.
+
+In terms of subsetting pools, some people use a specific depth cut-off for a species of interest (e.g., Mossop and Bradford 2006 used 0.1 m). Alternatively the pools that we focus on can be based on physical characteristics of the sampled reach. We will do the latter, keeping this code more widely applicable, by following Stack (1989) who determined meaningful pools as those that had a maximum depth greater than or equal to the standard deviation of depth for the reach. 
+
+In the following code chunk it reads 'custom_depth <- NULL'. This is our default subsetting (selects only pools with a maximum residual depth greater than the standard deviation of the residual depths for the entire sampled reach). If you want to subset the pools in another way, you can modify the code here. For example, if it is biologically meaningful for your system to consider only pools that are 0.1 m deep or greater during approaching-zero-flow periods, you can specify 'custom_depth <- 0.1'. Or, if you want to consider all pools no matter how shallow, then assign custom_depth a value of '0'. Just be sure to compare like-for-like when you consider different years/sites that you may wish to compare.
+
+```{r custom depth threshold}
+# Add a custom depth threshold in metres, or leave as 'NULL' to use standard deviation. If you are interested in all of the residual depths (i.e., not subsetting), just enter '0' for the custom_depth
+custom_depth <- NULL
+```
+
+```{r table of max depth, sagittal area, pool length, echo = FALSE}
+pool_summary_result <- create_pool_summary_table(residuals.df, custom_depth_threshold = custom_depth)
+pool_summary_result$pool_id <- as.character(pool_summary_result$pool_id)
+pool_summary_result <- pool_summary_result %>%
+  select(Site, year, everything())  # Move Site and Year to the left
+datatable(
+  pool_summary_result,
+  caption = "Residual Pool Summary by Pool: Maximum Depth, Length, Sagittal Area",
+  rownames = FALSE,  # Hide row numbers
+  options = list(
+    pageLength = 10,  # Number of rows per page
+    autoWidth = TRUE
+  )
+)%>%
+  formatRound(columns = names(pool_summary_result)[sapply(pool_summary_result, is.numeric)], digits = 3)
+
+# Export table
+export_table(as.data.frame(pool_summary_result), "Residual Pool Individual Max Depth Length Sagittal.csv")
+```
+
+The table above has been exported to your output folder. It displays the subset selection of residual pools, the sagittal area of each pool, the maximum residual depth (deepest point per pool at zero flow), and the pool length of each pool. When considered at the reach-scale, summary statistics of the maximum residual depth and pool length have been considered useful metrics to track pool quality and quantity (e.g., Lisle 1986, Mossop and Bradford 2006, Clark et al 2019).
+
+The reach mean of the pool maximum residual depths has been used as a proxy for pool quality, and positive relationships with Chinook salmon density have been demonstrated (e.g., Mossop and Bradford 2006). Relationships between habitat metrics and biota can be highly context-dependent, and independent verification is recommended where possible. However, as the resources required to test these assumptions are often prohibitive, we recommend taking advantage of relationships that have already been quantitatively demonstrated in the scientific literature. Although it *is* possible to generate quantitative estimates of biotic densities if the relationship between habitat metric and biotic density is monotonic, we feel that this is too speculative without data for your individual system. However, for the purpose of restoration monitoring, we feel it is incredibly powerful to be able to demonstrate (e.g.) that we have caused an *x*-sized increase in a habitat metric that is known to be positively correlated with target species density in a similar system. 
+
+The proportional length of pools in the reach also has demonstrated positive relationships with coho, Chinook densities (Clark et al 2019). Bear in mind that there will always be nuance involved in the application and interpretation of habitat metrics. You must understand and predict, in an *a priori* fashion, what your restoration objectives are with respect to habitat: Does your reach need more pool of a certain depth? Is your reach lacking much-needed riffles? Presumably there are cases where the reach has too much pool habitat. These types of questions are best addressed with well-matched reference sites, but local knowledge and the scientific literature will also be of great help.
+
+We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length in residual pool, for your data:
+
+```{r residual pool summary stats, echo = FALSE}
+# Function to calculate summary statistics for the subset of pools, grouped by Site and Year
+calculate_subset_summary <- function(pool_summary_df, residuals.df) {
+  # Initialize a list to store the results for each Site-Year combination
+  subset_summary_list <- list()
+  
+  # Group the pool summary dataframe by Site and Year
+  pool_summary_grouped <- split(pool_summary_df, list(pool_summary_df$Site, pool_summary_df$year))
+  
+  # Iterate over each Site-Year group
+  for (group_name in names(pool_summary_grouped)) {
+    group <- pool_summary_grouped[[group_name]]
+    
+    # Ensure the group has valid `Site` and `year` values
+    site <- unique(group$Site)
+    year <- unique(group$year)
+    
+    if (length(site) != 1 || length(year) != 1) {
+      warning(sprintf("Skipping group '%s' due to inconsistent Site or Year.", group_name))
+      next
+    }
+    
+    # Calculate total sagittal area for the subset of pools in this group
+    total_sagittal_area <- sum(group$sagittal_area, na.rm = TRUE)
+    
+    # Calculate mean and standard deviation of sagittal area for the subset of pools in this group
+    mean_sagittal_area <- mean(group$sagittal_area, na.rm = TRUE)
+    sd_sagittal_area <- sd(group$sagittal_area, na.rm = TRUE)
+    
+    # Calculate mean and standard deviation of maximum residual depth for the subset of pools
+    mean_max_residual_depth <- mean(group$max_residual_depth, na.rm = TRUE)
+    sd_max_residual_depth <- sd(group$max_residual_depth, na.rm = TRUE)
+    
+    # Subset the residuals.df for the current Site-Year group to get the total reach length
+    group_residuals.df <- residuals.df[residuals.df$Site == site & residuals.df$year == year, ]
+    
+    if (nrow(group_residuals.df) == 0) {
+      warning(sprintf("No matching rows in residuals.df for Site '%s' and Year '%s'.", site, year))
+      next
+    }
+    
+    # Calculate the proportion of reach length in residual pools for this group
+    total_pool_length <- sum(group$pool_length, na.rm = TRUE)
+    total_reach_length <- max(group_residuals.df$distance, na.rm = TRUE)
+    proportion_length_in_residual_pool <- total_pool_length / total_reach_length
+    
+    # Create a summary table for this group
+    subset_summary <- data.frame(
+      Site = site,
+      Year = year,
+      total_sagittal_area = total_sagittal_area,
+      mean_sagittal_area = mean_sagittal_area,
+      sd_sagittal_area = sd_sagittal_area,
+      mean_max_residual_depth = mean_max_residual_depth,
+      sd_max_residual_depth = sd_max_residual_depth,
+      proportion_length_in_residual_pool = proportion_length_in_residual_pool
+    )
+    
+    # Append the summary for the current Site-Year combination to the list
+    subset_summary_list[[group_name]] <- subset_summary
+  }
+  
+  # Combine the results from all Site-Year groups into a single dataframe
+  final_subset_summary_df <- do.call(rbind, subset_summary_list)
+  
+  return(final_subset_summary_df)
+}
+
+subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals.df)
+
+# Display the result as a table
+subset_summary_result <- subset_summary_result %>%
+  select(Site, Year, everything())  # Move Site and Year to the left
+datatable(
+  subset_summary_result,
+  caption = "Reach Summary Statistics for Pools by Site and Year",
+  rownames = FALSE,  # Hide row numbers
+  options = list(
+    pageLength = 10,  # Number of rows per page
+    autoWidth = TRUE
+  )
+)%>%
+  formatRound(columns = names(subset_summary_result)[sapply(subset_summary_result, is.numeric)], digits = 3)
+
+# Export table
+export_table(as.data.frame(subset_summary_result), "Reach Summary Stats for Pools by Site and Year.csv")
+```
+These above statistics should be useful for tracking changes over time, or comparing reference / control reaches. Because they are all based on residual depths, they are flow-independent. 
+
+Total sagittal area and proportion of the reach length in residual pool should be compared between years and/or sites, and you can interpret whether the changes are in the predicted direction and of a meaningful magnitude. Since these two metrics have one value per reach, the metrics themselves cannot be evaluated statistically (unless you have a large number of reaches/years), however a directional change over time that aligns with your predictions is obviously quite a good sign. 
+
+## Inferential Tests
+
+We can apply inferential statistical tests to the sagittal area, maximum pool depth, and pool length data - that is, the data which have values at the level of each pool (i.e., a population of values is available per reach/year). We will use inferential statistical tests to determine whether the differences we observed among reaches and years are likely to be due to chance. You will be familiar with p values of 0.05 (observed result expected just due to chance 1 in 20 times) and we will use p=0.05 as our cut-off here. However, depending on your adaptive management plans, you may be willing to accept different levels of certainty, and p values of 0.1 are not unheard of in restoration projects. This all depends on the risk tolerance of you and your team, and should be established before conducting analyses.
+
+For these inferential tests we will use ANOVAs because of their familiarity for ecologists and expected suitability for the data. For the metrics relating to residual pools that we have generated, we will test for differences between sites, years, and an interaction of sites*years (i.e., did the different locations change differently over time). The code uses the subset of pools that were defined earlier as 'meaningful'.
+
+**Choice of Metric**: At this point, you should choose which of 'sagittal area', 'maximum pool depth', and 'pool length' best aligns with your needs (e.g., relevance to restoration objective, comparisons with literature, ease of communication). You will base your interpretation of the ANOVA on this chosen metric, even though we will run ANOVA for all three. 
+
+The reason for selecting one metric for interpreting your hypothesis is that the metrics are not independent of one another: Sagittal area incorporates depth and length components, and all three metrics are connected in the stream; if you used a subset of the residual pools, all metrics inherently include some information about depth. If you were to continue without deciding upon a metric, it would be too tempting to come up with post-hoc explanations (e.g., if sagittal area increased but not depth or length). You should certainly consider potential implications of your results (carefully), but in terms of evaluating the success of your project, it is important that you decide in advance which metric change = success.
+
+Although it may be possible to run a MANOVA test (which can accommodate correlated dependent variables) using all three metrics together, MANOVA tests typically require larger sample sizes than we anticipate for many reach surveys. Therefore, we stick with multiple ANOVAs with a large dose of caution.
+
+### Assumption Robustness
+
+Whenever applying statistical tests, we should ensure that our data is suitable, in that it meets the assumptions of the intended inferential test. For ANOVAs the assumptions are:
+
+- Data in different groups should be independent: 
+
+  - One of your sites must not cause changes in another (though both sites experiencing shared 'external' causal factors, such as being in the same watershed, is acceptable). This is hopefully accounted for by good selection of impact/control/reference sites. 
+  
+  - You may note that no site is actually independent from that same site in the past. For longer time-series we would need to adopt a different inferential approach to avoid autocorrelation, but here we are dealing with simple before vs after comparisons, and it is widely accepted that ANOVAs are suitable for before/after comparisons if the comparison is balanced (e.g., 2 years of before data compared with 2 years of after data).
+  
+- Residuals are normally distributed: In this case we mean residuals more broadly - the difference between each datapoint and the mean. We will examine this assumption using Q-Q plots and the Shapiro-Wilk normality test.
+
+- Homoscedasticity: Variance should be broadly equal across all groups. We will test this with Levene's test.
+
+If any of these assumptions are violated, we can transform the data and test whether the transformed data (log-, arcsine- etc.) satisfies the assumptions. If this is not an option, we should seek a more suitable statistical test (e.g. Welch's ANOVA or mixed-effects models). 
+
+The tests of assumptions are carried out below, after we specify the before and after data that you wish to compare.
+
+#### Before / After Years
+
+Enter your before and after years in the below code, you may have more than one year in each category. Remember that these should balance (equal number of years before as after), but they need not be consecutive years. If you do not have balanced data (e.g., only one year was possible before project implementation) be very cautious in running and interpreting an ANOVA. You could select only a subset of your data to keep the comparison balanced, but if you do this for more than one set of dates you must account for the multiple comparisons inflating the likelihood of a Type I error (false positive).
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+
+```{r categorise by before after, echo = FALSE}
+# Categorize years
+pool_summary_result <- pool_summary_result %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+```
+
+The next section of code generates tests and figures that you should review to ensure your data are suitable for an ANOVA. In brief, look for the following:
+
+- Boxplots: consider whether outliers (dots) are real or errors
+- Q-Q plots: a reasonably straight line of points means alignment with normal distribution
+- Normality test (Shapiro-Wilk): p<0.05 indicates non-normality
+- Levene's test: p<0.05 indicates that variance among groups differs
+- Skewness values < 0 are left skewed, > 0 right skewed. Kurtosis values < 3 light-tailed, > 3 heavy-tailed.
+
+```{r normality assumptions etc, echo = FALSE}
+# Filter out sites without both time categories. Remove rows with pool_id = "Total". 
+pool_summary_filtered <- pool_summary_result %>%
+  filter(pool_id != "Total") %>%
+  group_by(Site) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  ungroup()
+
+############################ Function to generate boxplots. Look out for outliers
+generate_boxplots <- function(pool_summary_df) {
+  variables <- c("sagittal_area", "max_residual_depth", "pool_length")
+  boxplots_list <- list()
+  
+  for (var in variables) {
+    boxplot <- ggplot(pool_summary_df, aes(x = interaction(Site, Time_Category), y = .data[[var]])) +
+      geom_boxplot() +
+      labs(title = paste("Boxplot of", var), x = "Site-Time Category", y = var) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    boxplots_list[[var]] <- boxplot
+  }
+  return(boxplots_list)
+}
+
+# Generate boxplots
+boxplots <- generate_boxplots(pool_summary_filtered)
+
+# Display boxplots
+for (plot in boxplots) {
+  print(plot)
+} # Look out for outliers
+
+############################# Function to generate Q-Q plots. Look for deviations from linearity
+generate_qqplots <- function(pool_summary_df) {
+  # Create a list of variables to plot
+  variables <- c("sagittal_area", "max_residual_depth", "pool_length")
+  
+  # Initialize a list to store the Q-Q plots
+  qqplots_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    qqplot <- ggplot(pool_summary_df, aes(sample = .data[[var]])) +  
+      stat_qq() +
+      stat_qq_line() +
+      labs(title = paste("Q-Q Plot of", var)) +
+      facet_wrap(~ interaction(Site, year))
+    
+    # Add the plot to the list
+    qqplots_list[[var]] <- qqplot
+  }
+  
+  # Return the list of Q-Q plots
+  return(qqplots_list)
+}
+
+# Generate Q-Q plots
+qqplots <- generate_qqplots(pool_summary_filtered)
+
+# Display Q-Q plots
+for (plot in qqplots) {
+  print(plot)
+}  # Look for deviations from linearity
+
+############################# Function to test for normality 
+test_normality <- function(pool_summary_df) {
+  pool_summary_grouped <- split(pool_summary_df, list(pool_summary_df$Site, pool_summary_df$Time_Category))
+  normality_results_list <- list()
+  
+  for (group_name in names(pool_summary_grouped)) {
+    group <- pool_summary_grouped[[group_name]]
+    if (nrow(group) < 3) {
+      normality_results_list[[group_name]] <- data.frame(
+        Site = NA, Time_Category = NA,
+        max_residual_depth_p_value = NA,
+        sagittal_area_p_value = NA,
+        pool_length_p_value = NA,
+        message = "Not enough data for normality test"
+      )
+      next
+    }
+    max_residual_depth_test <- shapiro.test(group$max_residual_depth)
+    sagittal_area_test <- shapiro.test(group$sagittal_area)
+    pool_length_test <- shapiro.test(group$pool_length)
+    
+    normality_results_list[[group_name]] <- data.frame(
+      Site = unique(group$Site),
+      Time_Category = unique(group$Time_Category),
+      max_residual_depth_p_value = max_residual_depth_test$p.value,
+      sagittal_area_p_value = sagittal_area_test$p.value,
+      pool_length_p_value = pool_length_test$p.value,
+      message = "Normality test completed"
+    )
+  }
+  normality_results_df <- do.call(rbind, normality_results_list)
+  return(normality_results_df)
+}
+
+normality_results <- test_normality(pool_summary_filtered)
+
+normality_results %>%
+  mutate(
+    max_residual_depth_p_value = round(max_residual_depth_p_value, 3),
+    sagittal_area_p_value = round(sagittal_area_p_value, 3),
+    pool_length_p_value = round(pool_length_p_value, 3)
+  ) %>%
+  kable(
+    caption = "Normality Test Results for Pool Summary Data",
+    col.names = c("Site", "Time Category", 
+                  "Max Residual Depth P-Value", 
+                  "Sagittal Area P-Value", 
+                  "Pool Length P-Value", 
+                  "Message"),
+    align = "c",  # Center-align the columns
+    row.names = FALSE
+  ) # look out for p values <0.05 which indicate non-normality
+
+
+############################ Function to run Levene's Test for each variable
+run_levenes_test <- function(pool_summary_df) {
+  # Create a list of variables to test
+  variables <- c("sagittal_area", "max_residual_depth", "pool_length")
+  
+  # Initialize a list to store Levene's test results
+  levene_results_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    levene_test <- leveneTest(as.formula(paste(var, "~ interaction(Site, year)", sep = "")), data = pool_summary_df)
+    
+    # Store the results in the list
+    levene_results_list[[var]] <- levene_test
+  }
+  
+  # Return the list of Levene's test results
+  return(levene_results_list)
+}
+
+# Run Levene's test
+levene_results <- run_levenes_test(pool_summary_filtered)
+
+# Display Levene's test results with variable names
+for (var_name in names(levene_results)) {
+  cat("\n--- Levene's Test Results for", var_name, "---\n")
+  print(levene_results[[var_name]])
+} # If p < 0.05 then variance *is* different among groups 
+
+######################### Function to calculate skewness and kurtosis
+calculate_skew_kurt <- function(pool_summary_df) {
+  # Create a list of variables to analyze
+  variables <- c("sagittal_area", "max_residual_depth", "pool_length")
+  
+  # Initialize a list to store the results
+  skew_kurt_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    skew <- skewness(pool_summary_df[[var]], na.rm = TRUE)
+    kurt <- kurtosis(pool_summary_df[[var]], na.rm = TRUE)
+    
+    # Store the results
+    skew_kurt_list[[var]] <- data.frame(
+      Variable = var,
+      Skewness = skew,
+      Kurtosis = kurt
+    )
+  }
+  
+  # Combine the results into a single dataframe
+  skew_kurt_df <- do.call(rbind, skew_kurt_list)
+  
+  return(skew_kurt_df)
+}
+
+# Calculate skewness and kurtosis
+skew_kurt_result <- calculate_skew_kurt(pool_summary_filtered)
+
+# Display skewness and kurtosis results
+print(skew_kurt_result)
+```
+
+If, based on the above evaluation, your data appear to be unsuitable for the intended inferential test you may wish to use an alternative non-parametric test or transform the data. We provide some assistance for transformations here, but this part may require some more work on your part since we cannot predict what your data will need.
+
+As an example, our data appeared normally distributed (p>0.05 Shapiro-Wilk) but Levene's test revealed that sagittal area variance was unequal across site-years (p<0.05). We therefore log-transformed the sagittal area data and re-ran the above diagnostics, with Levene's test returned as non-significant and therefore acceptable to be used in ANOVAs. Note that only those metrics that do not meet the assumptions need to be transformed.
+
+The code we used for the transformation is below. If you need to transform the data, follow these steps:
+
+### Transformations
+
+1. Add your transformation(s) to the code chunk below. You must add a formula to calculate an appropriate transformation for each applicable variable within *transformations <- list(...)*). As an example, if you want to try a log transformation, replace 'identity,' in the below code with 'function(x) ifelse(x > 0, log(x), NA),'
+
+2. Re-run the above diagnostics code after updating the applicable variable name(s) for each diagnostic test: where it says '*variables <- c("sagittal_area", "max_residual_depth", "pool_length")*' you will update each applicable transformed variable name(s) to "*transformed_*variable_name"
+
+3. Once you have a transformed variable that meets the assumptions of the ANOVA, update the ANOVA inferential test code (in the subsequent code chunk) to use the "*transformed_*variable_name"
+
+```{r transformations}
+# Function to apply transformations and append to the dataframe
+apply_transformations <- function(data, transformations) {
+  for (var in names(transformations)) {
+    transform_fn <- transformations[[var]]
+    transformed_var <- paste0("transformed_", var)
+    # Apply the transformation and append as a new column
+    data[[transformed_var]] <- transform_fn(data[[var]])
+  }
+  return(data)
+}
+
+# Define transformations as a named list. You can add appropriate transformations here, then once you confirm the transformation is suitable, amend the anova code to call the correct variable
+
+# Use 'identity' if no transformation is needed
+transformations <- list(
+  sagittal_area = identity, # example code fo log-transformation: replace 'identity,' with 'function(x) ifelse(x > 0, log(x), NA),' 
+  max_residual_depth = identity,  # No transformation
+  pool_length = identity # no transformation 
+)
+
+# Apply transformations and update the dataframe
+pool_summary_filtered <- apply_transformations(pool_summary_filtered, transformations)
+```
+ 
+### ANOVA 
+
+Once you have satisfied yourself that your data (or transformed data) are suitable, we will run the inferential tests. We use ANOVA to ask whether the following metrics differ among sites, years, and site*year interactions:
+
+- Sagittal area
+- Maximum residual depth
+- Pool length
+
+If you did use transformed data, ensure you reference that variable in the below code (e.g., change "sagittal_area" to "transformed_sagittal_area")
+
+```{r pool ANOVAs}
+# Function to run ANOVA for a given variable
+run_anova <- function(data, variable) {
+  formula <- as.formula(paste(variable, "~ Site * Time_Category"))
+  anova_result <- aov(formula, data = data)
+  summary(anova_result)
+}
+
+# Ensure transformed data is used in the ANOVA if necessary (change the variable name in quotation marks in these next rows)
+anova_max_residual_depth <- run_anova(pool_summary_filtered, "max_residual_depth")
+anova_pool_length <- run_anova(pool_summary_filtered, "pool_length")
+anova_sagittal_area <- run_anova(pool_summary_filtered, "sagittal_area")
+```
+
+```{r view pool ANOVAs, echo = FALSE}
+# view results
+print("_______________ANOVA for Max Residual Depth______________")
+print(anova_max_residual_depth)
+print("_______________ANOVA for Residual Pool Length______________")
+print(anova_pool_length)
+print("_______________ANOVA for Residual Pool Sagittal Area______________")
+print(anova_sagittal_area)
+
+# export test summaries
+maxdeep_output <- capture.output(print(anova_max_residual_depth))  # Capture the printed outputs
+poollong_output <- capture.output(print(anova_pool_length))  # 
+saggi_output <- capture.output(print(anova_sagittal_area))  # 
+summary_text <- c("ANOVA for Max Residual Depth:", maxdeep_output, "\n\n\n", "ANOVA for Residual Pool Length:", poollong_output,"\n\n\n",  "ANOVA for Residual Pool Sagittal Area:", saggi_output)
+export_summary(summary_text, "Residual Pool ANOVAs")
+```
+
+Take some time to ensure you understand what the above tells you, particularly with regards to your chosen metric of success. In the example ANOVA above, there was one site:time interaction that was significant at p=0.05 (maximum residual depth), and the time category was significant for all metrics. This suggests that a change in metrics over time was not likely due to chance, but only for maximum residual depth did our restoration site change over time differently than the control site. However, we chose sagittal area as our *a priori* success metric, so we cannot interpret this as a successful restoration action at this point in time.
+
+Although we could not discard our alternative hypothesis (that changes at our restoration site were not due to our actions), we may still learn from the above to inform future plans. Consider all the information we have generated so far for you data, and take some time to think about it. Step outside to do this if you are able to. Consider what it might mean if pools at our restoration site appear deeper on average, but sagittal areas did not change? Consider whether there are pools that did or did not scrape through the subsetting cut-off (i.e., very small pools of marginal value), how might they impact your mean values? Was there a big enough change in these marginal cases to create statistical significance? Is any of this biologically or geomorphically meaningful based on your hypotheses?
+
+This is all endlessly interesting/maddening (depending on your perspective) and we highly recommend finding another person (or several) to talk it through with. Before moving on to further analyses, ensure you have a reasonable understanding of the information so far. Take a step back to think about the big picture.
+
+# Volume Estimation
+
+If you have no hypotheses or predictions specifically regarding pool *volumes*, you may wish to skip this section and move onto *Fine Sediment in Pools*.
+
+If you took wetted width measurements at transects along the reach, you can use the average to estimate the volume of residual pools. This approach is a more simplified approach than that of Robison (1998) who linked wetted width measurements to nearby longitudinal intervals. If this is possible for the data you collected, we recommend reviewing Robison (1998) to obtain more 'localised' estimates of wetted width. However, bear in mind that there may regardless be a bias in residual wetted widths if (e.g.) pools tend to be wider than riffles. For our simplified approach we assume that the wetted width is constant for the reach, and we also assume that the stream cross sections are perfect triangles. We then use the ratio of residual depths to field-recorded depths to estimate the residual wetted widths of pools when flow approaches zero. 
+
+Considering changes in (coarsely-estimated) pool volume can be of interest due to the potential for natural processes to alter both the longitudinal and cross-sectional heterogeneity of a stream. For example, perhaps we are anticipating a narrower wetted channel with deeper pools, and want to explore what this means for pool volume. However, as suggested by the coarse assumptions we made for this calculation, interpret results with caution. 
+
+```{r pool volumes, echo = FALSE}
+calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
+  # Initialize a list to store results for each site-year combination
+  pool_volumes_list <- list()
+  
+  # Group the data by Site and Year
+  grouped_pool_summary <- split(pool_summary_df, list(pool_summary_df$Site, pool_summary_df$year))
+  
+  # Iterate over each Site-Year group
+  for (group_name in names(grouped_pool_summary)) {
+    # Get the current group
+    group <- grouped_pool_summary[[group_name]]
+    
+    # Extract the site and year
+    site <- unique(group$Site)
+    year <- unique(group$year)
+    
+    # Check if site or year are invalid
+    if (length(site) != 1 || length(year) != 1 || is.na(site) || is.na(year)) {
+      warning(sprintf("Invalid Site or Year in group: %s. Skipping...", group_name))
+      next
+    }
+    
+    # Filter the main dataframe to match the current Site-Year
+    site_year_data <- df[df$Site == site & df$year == year, ]
+    
+    # Check if the subset is empty
+    if (nrow(site_year_data) == 0) {
+      warning(sprintf("No data found for Site '%s' and Year '%s'. Skipping...", site, year))
+      next
+    }
+    
+    # Get the subset of pool IDs for this group
+    subset_pool_ids <- as.numeric(group$pool_id)  # Convert to numeric if necessary
+    
+    # Ensure the dataframe is sorted by distance
+    site_year_data <- site_year_data[order(site_year_data$distance), ]
+    
+    # Filter the dataframe to only include rows belonging to the subset of pool IDs
+    site_year_data <- site_year_data[site_year_data$pool_id %in% subset_pool_ids, ]
+    
+    # Initialize a list to store volumes for each pool in this Site-Year group
+    pool_volumes <- list()
+    
+    # Iterate over unique pool IDs in the subset
+    for (pool_id in subset_pool_ids) {
+      # Subset the data for the current pool
+      pool_data <- site_year_data[site_year_data$pool_id == pool_id, ]
+      
+      # Skip if there are fewer than 2 points in the 'pool' (including outlet, i.e. not pools)
+      if (nrow(pool_data) < 2) {
+        pool_volumes[[as.character(pool_id)]] <- NA
+        next
+      }
+      
+      # Initialize the pool volume
+      pool_volume <- 0
+      
+      # Loop through consecutive rows to calculate segment volumes
+      for (i in 1:(nrow(pool_data) - 1)) {
+        # Residual width and depth for current and next point
+        width_i <- pool_data$residual_width[i]
+        depth_i <- pool_data$residual_depth[i]
+        width_next <- pool_data$residual_width[i + 1]
+        depth_next <- pool_data$residual_depth[i + 1]
+        
+        # Check for NA values
+        if (is.na(width_i) || is.na(depth_i) || is.na(width_next) || is.na(depth_next)) {
+          next
+        }
+        
+        # Calculate cross-sectional areas
+        area_i <- 0.5 * width_i * depth_i
+        area_next <- 0.5 * width_next * depth_next
+        
+        # Calculate mean cross-sectional area
+        mean_area <- (area_i + area_next) / 2
+        
+        # Calculate distance between current and next point
+        spacing <- pool_data$distance[i + 1] - pool_data$distance[i]
+        
+        # Add segment volume to total pool volume
+        pool_volume <- pool_volume + mean_area * spacing
+      }
+      
+      # Store the volume for this pool
+      pool_volumes[[as.character(pool_id)]] <- pool_volume
+    }
+    
+    # Convert the results into a dataframe for the current Site-Year group
+    pool_volumes_df <- data.frame(
+      pool_id = names(pool_volumes),
+      pool_volume_m3 = unlist(pool_volumes),
+      Site = site,
+      year = year
+    )
+    
+    # Append the result for the current group to the list
+    pool_volumes_list[[group_name]] <- pool_volumes_df
+  }
+  
+  # Combine all site-year results into a single dataframe
+  final_pool_volumes_df <- do.call(rbind, pool_volumes_list)
+  
+  return(final_pool_volumes_df)
+}
+
+# Use pool_summary_result from the previous step to get the subset of pool IDs
+pool_volumes_result <- calculate_pool_volumes_for_sites_years(residuals.df, pool_summary_result)
+
+# Display the result as a table
+pool_volumes_result <- pool_volumes_result %>%
+  select(Site, year, everything())  # Move Site and Year to the left
+datatable(
+  pool_volumes_result,
+  caption = "Pool Volumes by Site and Year",
+  rownames = FALSE,  # Hide row numbers
+  options = list(
+    pageLength = 10,  # Number of rows per page
+    autoWidth = TRUE
+  )
+)%>%
+  formatRound(columns = names(pool_volumes_result)[sapply(pool_volumes_result, is.numeric)], digits = 3)
+
+# Export table
+export_table(as.data.frame(pool_volumes_result), "Residual Pool Volume Estimates.csv")
+```
+
+The above table lists the volume estimates for each of the 'meaningful' subset of residual pools, and this table is also exported to your output folder. Next we will display and export a table with some key summary statistics for the reach: Total volume of residual pools, and the mean and standard deviation residual volume of pools.
+
+```{r pool volume summary stats, echo = FALSE}
+# Function to calculate volume-related summary statistics for the subset of pools
+calculate_volume_summary_for_sites_years <- function(pool_volumes_df) {
+  # Ensure Site and Year columns are present
+  if (!("Site" %in% colnames(pool_volumes_df)) || !("year" %in% colnames(pool_volumes_df))) {
+    stop("The dataframe must include 'Site' and 'year' columns.")
+  }
+  
+  # Split the data by Site and Year
+  grouped_data <- split(pool_volumes_df, list(pool_volumes_df$Site, pool_volumes_df$year))
+  
+  # Initialize a list to store summary statistics
+  volume_summary_list <- list()
+  
+  # Iterate over each Site-Year group
+  for (group_name in names(grouped_data)) {
+    # Get the current group
+    group <- grouped_data[[group_name]]
+    
+    # Extract Site and Year (ensuring uniqueness)
+    site <- unique(group$Site)
+    year <- unique(group$year)
+    
+    # Check for valid Site and Year
+    if (length(site) != 1 || length(year) != 1 || is.na(site) || is.na(year)) {
+      warning(sprintf("Invalid Site or Year in group: %s. Skipping...", group_name))
+      next
+    }
+    
+    # Calculate total residual pool volume
+    total_residual_volume <- sum(group$pool_volume_m3, na.rm = TRUE)
+    
+    # Calculate mean residual pool volume
+    mean_residual_volume <- mean(group$pool_volume_m3, na.rm = TRUE)
+    
+    # Calculate standard deviation of residual pool volume
+    sd_residual_volume <- sd(group$pool_volume_m3, na.rm = TRUE)
+    
+    # Create a summary table for the current Site-Year
+    volume_summary <- data.frame(
+      Site = site,
+      year = year,
+      total_residual_volume = total_residual_volume,
+      mean_residual_volume = mean_residual_volume,
+      sd_residual_volume = sd_residual_volume
+    )
+    
+    # Append the summary to the list
+    volume_summary_list[[group_name]] <- volume_summary
+  }
+  
+  # Combine all Site-Year summaries into a single dataframe
+  final_volume_summary_df <- do.call(rbind, volume_summary_list)
+  
+  return(final_volume_summary_df)
+}
+
+# Calculate the summary statistics for the subset of pools based on their volumes
+volume_summary_result <- calculate_volume_summary_for_sites_years(pool_volumes_result)
+
+# Display the result as a table
+volume_summary_result <- volume_summary_result %>%
+  select(Site, year, everything())  # Move Site and Year to the left
+datatable(
+  volume_summary_result,
+  caption = "Volume Summary Statistics for Subset of Pools by Site and Year",
+  rownames = FALSE,  # Hide row numbers
+  options = list(
+    pageLength = 10,  # Number of rows per page
+    autoWidth = TRUE
+  )
+)%>%
+  formatRound(columns = names(volume_summary_result)[sapply(volume_summary_result, is.numeric)], digits = 3)
+
+# Export table
+export_table(as.data.frame(volume_summary_result), "Reach Residual Pool Volume Metrics by Site and Year.csv")
+```
+
+## Inferential Tests - Volume
+
+Following the same approach as for the one- and two-dimensional pool metrics, we will use ANOVAs to test the pool volume differences between sites and years.
+
+## Assumption Robustness
+
+As before, the first step is to check whether an ANOVA is suitable for the variables.
+
+```{r volume data evaluating, echo=FALSE}
+#### add the before/after categories from previous input
+pool_volumes_result <- pool_volumes_result %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+
+# Filter out sites without both time categories. Remove rows with pool_id = "Total"
+pool_volumes_filtered <- pool_volumes_result %>%
+  filter(pool_id != "Total") %>%
+  group_by(Site) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  ungroup()
+
+############## Shapiro Wilk Normality Test
+test_normality_volumes <- function(pool_volumes_df) {
+  pool_volumes_grouped <- split(pool_volumes_df, list(pool_volumes_df$Site, pool_volumes_df$Time_Category))
+  normality_results_list <- list()
+  
+  for (group_name in names(pool_volumes_grouped)) {
+    group <- pool_volumes_grouped[[group_name]]
+    if (nrow(group) < 3) {
+      normality_results_list[[group_name]] <- data.frame(
+        Site = NA, Time_Category = NA,
+        pool_volume_m3_p_value = NA,
+        message = "Not enough data for normality test"
+      )
+      next
+    }
+    pool_volume_test <- shapiro.test(group$pool_volume_m3)
+    
+    normality_results_list[[group_name]] <- data.frame(
+      Site = unique(group$Site),
+      Time_Category = unique(group$Time_Category),
+      pool_volume_m3_p_value = pool_volume_test$p.value,
+      message = "Normality test completed"
+    )
+  }
+  normality_results_df <- do.call(rbind, normality_results_list)
+  return(normality_results_df)
+}
+
+# Test normality for pool volumes
+normality_results_volumes <- test_normality_volumes(pool_volumes_filtered)
+# display in table
+normality_results_volumes %>%
+  mutate(
+    pool_volume_m3_p_value = round(pool_volume_m3_p_value, 3)
+  ) %>%
+  kable(
+    caption = "Normality Test Results for Pool Volume Data",
+    col.names = c("Site", "Time Category", 
+                  "Pool Volume P-Value", 
+                  "Message"),
+    align = "c",  # Center-align the columns
+    row.names = FALSE
+  ) # look out for p values <0.05 which indicate non-normality
+
+############### Levenes test for equality of variance
+run_levenes_test_volumes <- function(pool_volumes_df) {
+  # Levene's test for pool volumes
+  levene_test <- leveneTest(pool_volume_m3 ~ interaction(Site, year), data = pool_volumes_df)
+  return(levene_test)
+}
+
+# Run Levene's test for pool volumes
+levene_results_volumes <- run_levenes_test_volumes(pool_volumes_filtered)
+print(levene_results_volumes)
+
+################# Function to generate additional diagnostics for pool volumes
+generate_assumption_diagnostics <- function(pool_volumes_df) {
+  # Q-Q plot
+  qq_plot <- ggplot(pool_volumes_df, aes(sample = pool_volume_m3)) +
+    geom_qq() +
+    geom_qq_line() +
+    ggtitle("Q-Q Plot for Pool Volume (m3)")
+  
+  # Skewness and Kurtosis
+  skew_value <- skewness(pool_volumes_df$pool_volume_m3, na.rm = TRUE)
+  kurt_value <- kurtosis(pool_volumes_df$pool_volume_m3, na.rm = TRUE)
+  
+  # Boxplot
+  boxplot <- ggplot(pool_volumes_df, aes(x = Site, y = pool_volume_m3, fill = Time_Category)) +
+    geom_boxplot() +
+    labs(title = "Boxplot of Pool Volume by Site and Time Category") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # Return all diagnostics
+  return(list(
+    boxplot = boxplot,
+    qq_plot = qq_plot,
+    skewness = skew_value,
+    kurtosis = kurt_value
+  ))
+}
+
+#### Apply to pool_volumes_filtered
+diagnostics <- generate_assumption_diagnostics(pool_volumes_filtered)
+
+#### Print results
+print(diagnostics$boxplot)
+print(diagnostics$qq_plot)
+cat("Skewness:", diagnostics$skewness, "\n")
+cat("Kurtosis:", diagnostics$kurtosis, "\n")
+```
+We needed to transform our volume data, which was not normally distributed. Following the same transformation steps as before, We replaced 'pool_volume_m3' with the log-transformed 'transformed_pool_volume_m3' (using the below code) and re-ran the diagnostics. Our Q-Q plot and tests looked much better, so we used the transformed variable in the ANOVA.
+
+```{r volume transformation}
+# Define transformations as a named list for pool volume
+transformations <- list(
+  pool_volume_m3 = function(x) ifelse(x > 0, log(x), NA)  # Log transformation with handling for non-positive values (volumes should all be positive!)
+)
+
+# Apply transformations and update the dataframe
+pool_volumes_filtered <- apply_transformations(pool_volumes_filtered, transformations)
+```
+## ANOVA - volume 
+
+```{r inferential tests vol}
+# Ensure transformed data is used in the ANOVA function if necessary (change the variable name in quotation marks)
+anova_pool_volumes <- run_anova(pool_volumes_filtered, "pool_volume_m3") # adjust to "transformed_pool_volumes_m3" as needed
+```
+```{r print vol ANOVAs, echo = FALSE}
+#print results
+print(anova_pool_volumes)
+
+# export test summary
+vol_output <- capture.output(print(anova_pool_volumes))  # Capture the printed output
+summary_text <- c("ANOVA for Residual Pool Volume", vol_output)
+export_summary(summary_text, "Residual Pool Volume ANOVA")
+```
+When interpreting potential changes in pool volume metrics, remember that we needed to make assumptions regarding the widths of residual pools, making these volume metrics more speculative than sagittal area metrics. While volumes can be useful for interpretation, if there are disagreements between the inferential test results among volume- and area/length-based metrics, we recommend defaulting to the latter (unless, of course, you have a solid _a priori_ hypothesis and prediction that suggests volume should differ in the way you observed).
+
+# Fine Sediment in Pools
+
+The longitudinal survey included presence/absence observations of fine sediment along the thalweg. Here we will generate a metric of the proportion of residual pool thalweg that features fine sediments. 
+
+Note that, while the previous metrics in this script use the 'custom depth' threshold to subset what are considered 'meaningful' pools, we recommend considering fine sediment relative to the full contingent of residual pools that the code has identified. Our rationale is that the fines metrics relate more closely to the mechanisms that can be responsible for making pools 'meaningful' (or not) in terms of fish habitat availability. If we were to look at the proportion of fines only in 'meaningful' (deep enough) pools, we might miss pools that are closer to being 'not pools' (i.e., recently filling-in or scouring of sediment). Of course, when pools are fully infilled with sediment they will not be detected as pools at all, but the ability to recognise when a pool is filling in (or scouring out) may be an important indicator of restoration success, or a trigger for adaptive management actions.
+
+```{r fines, echo = FALSE}
+calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_threshold = NULL, use_sd_threshold = FALSE) {
+  # Ensure the residuals dataframe has 'Site' and 'year' columns for grouping
+  if (!all(c("Site", "year") %in% colnames(residuals.df))) {
+    stop("residuals.df must contain 'Site' and 'year' columns.")
+  }
+  
+  # Initialize a list to store results
+  fines_proportion_list <- list()
+  
+  # Group residuals by Site and year
+  unique_sites_years <- unique(residuals.df[c("Site", "year")])
+  
+  for (i in 1:nrow(unique_sites_years)) {
+    site <- unique_sites_years$Site[i]
+    year <- unique_sites_years$year[i]
+    
+    # Subset the residuals dataframe for the current Site and year
+    subset_residuals <- residuals.df[residuals.df$Site == site & residuals.df$year == year, ]
+    
+        if (nrow(subset_residuals) == 0 || all(is.na(subset_residuals$residual_depth))) {
+    message(paste("Skipping Site:", site, "Year:", year, 
+                  "- no valid residual depth data available."))
+    next
+}
+    # Ensure the dataframe is sorted by distance within each pool
+    subset_residuals <- subset_residuals[order(subset_residuals$pool_id, subset_residuals$distance), ]
+    
+    # Trim whitespace from the Fines column
+    subset_residuals$Fines <- trimws(subset_residuals$Fines)
+    
+    # Initialize a list to store results for the current Site/year
+    fines_proportion_site_year <- list()
+    
+    # Calculate the standard deviation of residual depth if needed
+    if (use_sd_threshold) {
+      sd_residual_depth <- sd(subset_residuals$residual_depth, na.rm = TRUE)
+    }
+    
+    # Iterate over each unique pool_id
+    unique_pool_ids <- unique(subset_residuals$pool_id)
+    for (pool_id in unique_pool_ids) {
+      # Skip if pool_id is NA
+  if (is.na(pool_id)) {
+    next
+  }
+      # Subset data for the current pool
+      pool_residuals <- subset_residuals[subset_residuals$pool_id == pool_id, ]
+      
+       # Ensure there is data before calculating the maximum residual depth
+  if (nrow(pool_residuals) == 0 || all(is.na(pool_residuals$residual_depth))) {
+    message(paste("Skipping Pool:", pool_id, "Site:", site, "Year:", year, "- no valid residual depth data available."))
+    next
+  }
+      # Calculate the maximum residual depth
+      max_residual_depth <- max(pool_residuals$residual_depth, na.rm = TRUE)
+      
+      # Apply selection criteria: either the max residual depth is >= sd or the custom threshold is met
+      if (!is.null(custom_depth_threshold)) {
+        if (max_residual_depth < custom_depth_threshold) {
+          next  # Skip this pool if it doesn't meet the custom threshold
+        }
+      } else if (use_sd_threshold && max_residual_depth < sd_residual_depth) {
+        next  # Skip this pool if it doesn't meet the SD threshold
+      }
+      
+      # Initialize a column for segment lengths
+      pool_residuals$segment_length <- NA
+      
+      # Calculate segment lengths
+      for (i in 1:nrow(pool_residuals)) {
+        if (i == 1) {
+          pool_residuals$segment_length[i] <- (pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2
+        } else if (i == nrow(pool_residuals)) {
+          pool_residuals$segment_length[i] <- (pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2
+        } else {
+          pool_residuals$segment_length[i] <- 
+            ((pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2) +
+            ((pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2)
+        }
+      }
+      
+      # Calculate the length of the pool
+      pool_length <- sum(pool_residuals$segment_length, na.rm = TRUE)
+      
+      # Calculate the total length with Fines containing "y" or "yes" (case-insensitive)
+      fines_length <- sum(
+        pool_residuals$segment_length[
+          grepl("\\b(y|yes)\\b", pool_residuals$Fines, ignore.case = TRUE)
+        ],
+        na.rm = TRUE
+      )
+      
+      # Calculate the proportion
+      fines_proportion <- fines_length / pool_length
+      
+      # Store results for the current pool
+      fines_proportion_site_year[[as.character(pool_id)]] <- list(
+        pool_length = pool_length,
+        fines_length = fines_length,
+        fines_proportion = fines_proportion
+      )
+    }
+    
+    # Convert the results into a dataframe for the current Site/year
+    if (length(fines_proportion_site_year) > 0) {
+      pool_ids <- names(fines_proportion_site_year)
+      fines_proportion_df <- data.frame(
+        pool_id = pool_ids,
+        pool_length = sapply(fines_proportion_site_year, function(x) x$pool_length),
+        fines_length = sapply(fines_proportion_site_year, function(x) x$fines_length),
+        fines_proportion = sapply(fines_proportion_site_year, function(x) x$fines_proportion),
+        Site = site,
+        year = year
+      )
+      
+      # Calculate overall summary statistics for the current Site/year
+      total_all_pools_length <- sum(fines_proportion_df$pool_length, na.rm = TRUE)
+      total_all_fines_length <- sum(fines_proportion_df$fines_length, na.rm = TRUE)
+      overall_fines_proportion <- total_all_fines_length / total_all_pools_length
+      
+      # Add the overall summary as a final row
+      final_row <- data.frame(
+        pool_id = "Total",
+        pool_length = total_all_pools_length,
+        fines_length = total_all_fines_length,
+        fines_proportion = overall_fines_proportion,
+        Site = site,
+        year = year
+      )
+      
+      # Bind the final row to the main dataframe
+      fines_proportion_df <- rbind(fines_proportion_df, final_row)
+      
+      # Store the result for the current Site/year
+      fines_proportion_list[[paste(site, year, sep = "_")]] <- fines_proportion_df
+    }
+  }
+  
+  # Combine results from all Sites and years into one dataframe
+  combined_fines_proportion_df <- do.call(rbind, fines_proportion_list)
+  
+  return(combined_fines_proportion_df)
+}
+```
+
+However, should it be of greater interest for your project, we have included in the code below the ability to select a subset of pools. Consistent with the previous custom depth threshold, you can add a specified depth in metres, or enter 'NULL' to select only pools with a maximum residual depth greater than the standard deviation of the residual depths for the entire sampled reach. Our default is 0 (no subsetting).
+
+```{r fines custom depth}
+# Define custom threshold if required. We recommend 0 (all residual pools, regardless of maximum depth)
+custom_depth <- 0  # Replace with your desired threshold in metres, or set to NULL to use the standard deviation of the reach (that year)
+```
+
+```{r fines table dataframes, echo = FALSE}
+# Call the calculate_fines_proportion function with the required parameters
+fines_proportion_result <- calculate_fines_proportion(
+  pool_data = pool_summary_result,   # 
+  residuals.df = residuals.df,       # 
+  custom_depth_threshold = custom_depth,  # Use custom threshold for filtering (will overwrite NULL / SD case)
+  use_sd_threshold = TRUE            # TRUE = SD is used when there is no custom_depth specified. 
+)
+                                                                                                                                                           
+# Split the results by Site
+site_split <- split(fines_proportion_result, fines_proportion_result$Site)
+
+# Create a named list to store each site's data
+site_data_frames <- list()
+
+# Loop through each site, sort the data, and display the tables
+for (site_name in names(site_split)) {
+  site_data <- site_split[[site_name]]
+  
+  # Separate the "Total" row
+  total_row <- site_data[site_data$pool_id == "Total", ]
+  site_data <- site_data[site_data$pool_id != "Total", ]
+  
+  # Convert pool_id to numeric for sorting, handling non-numeric values
+  site_data$pool_id_numeric <- as.numeric(as.character(site_data$pool_id))
+  
+  # Sort by year and pool_id_numeric
+  site_data <- site_data[order(site_data$year, site_data$pool_id_numeric), ]
+  
+  # Drop the temporary numeric column
+  site_data$pool_id_numeric <- NULL
+  
+  # Ensure the "Total" row has the same columns as site_data
+  total_row <- total_row[, names(site_data), drop = FALSE]
+  
+  # Reattach the "Total" row at the bottom
+  sorted_site_data <- rbind(site_data, total_row)
+  
+  # Move Site and year columns to the left and format the datatable
+  sorted_site_data <- sorted_site_data %>%
+    select(Site, year, everything())  # Move Site and year to the left
+  
+# Remove row names from the data frame explicitly
+  rownames(sorted_site_data) <- NULL
+  
+ # Store the cleaned data in the list
+  site_data_frames[[site_name]] <- sorted_site_data
+}
+```
+
+```{r create tables, echo = FALSE, results='asis'}
+for (site_name in names(site_data_frames)) {
+  # Prepare generic file name for export
+  filename <- paste0(site_name, "_pool_fines.csv")  # .csv extension
+  
+  # Export the table as .csv
+  export_table(site_data_frames[[site_name]], filename)
+  
+  #print table in R
+  cat("\n")
+  print(
+    kable(site_data_frames[[site_name]], 
+          caption = paste(site_name, "- Pool Fine Sediment"), 
+          format = "html", align = "c", digits = 3) %>%
+      kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+  )
+  cat("\n")
+}
+
+# Export table occurs within function above
+```
+
+The above tables (also exported to output folder) include a final row for each site-year with reach total pool length, reach total pool length with fine sediment, and the reachwide proportion of pools with fines (a ratio from 0 to 1). Comparison of the reachwide proportion alone may be sufficient to demonstrate project effectiveness, perhaps complemented with the figure that we will create below. However, if you would like to statistically compare how fine sediment changed over time compared with a control, we can look at the distributions of underlying pool data (the fines_proportion data for every pool).
+
+## Inferential Tests - Fines
+
+This time, we are dealing with data that are bounded by 0 and 1. And in many cases, we also anticipate a relatively high frequency of 0s (no fines in pools) and/or 1s (fines throughout). We are confident that non-transformed data would violate the assumptions of ANOVA, so we omit the initial diagnostic tests. Our attempts to arcsine-transform the data were not successful, as our transformed data remained non-normally distributed with significant heteroscedasticity. As such, and since we suspect our fines data distribution is not particularly unusual, we opted for Beta regression.
+
+<div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; background-color: #f9f9f9; font-size: smaller;">
+Slightly nerdy bit, feel free to ignore: Beta regressions are capable of dealing with non-normal heteroscedastic data. Although they cannot actually handle 0's and 1's, for our case they are preferable over two-part models (e.g. hurdle models): Since an observation of "no fine sediment" could very plausibly be recorded where 2 cm of fine sediment was actually present in a 20 m pool, we are comfortable adjusting the 0's and 1's to 0.001 and 0.999. We feel a hurdle model would excessively complicate interpretability (e.g. a binomial fines presence/absence mechanism plus a fines quantity mechanism). See Geissinger et al 2022 if interested.
+</div>
+
+We will generate a frequency plot of the fine proportion data, fit the Beta regression, and plot the frequency distribution of the residuals (which should be broadly symmetrical around zero) and their relationships to the fitted values (for which no clear relationship or heteroscedasticity should be evident). We will only export the results of the Beta regression to your output folder.
+
+```{r fines data evaluating, echo = FALSE}
+#### add the before/after categories from previous input
+fines_proportion_result <- fines_proportion_result %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+
+# Filter out sites without both time categories. Remove rows with pool_id = "Total"
+fines_proportion_filtered <- fines_proportion_result %>%
+  filter(pool_id != "Total") %>%
+  group_by(Site) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  ungroup()
+
+# Adjust values of exactly 0 or 1 (if any)
+fines_proportion_filtered <- fines_proportion_filtered %>%
+  mutate(fines_proportion_adjusted = case_when(
+    fines_proportion == 0 ~ 0.001,  # Slightly adjust 0
+    fines_proportion == 1 ~ 0.999,  # Slightly adjust 1
+    TRUE ~ fines_proportion         # Keep other values as is
+  ))
+
+# Step 2: Visualize the distribution of fines_proportion
+ggplot(fines_proportion_filtered, aes(x = fines_proportion_adjusted)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+  geom_density(color = "red", linewidth = 1) +
+  labs(title = "Distribution of Fines Proportion (Adjusted)",
+       x = "Fines Proportion (Adjusted)", y = "Frequency") +
+  theme_minimal()
+
+# Step 3: Fit a Beta regression model
+# Include Site, Year, and Time_Category in the formula
+beta_model <- betareg(fines_proportion_adjusted ~ Site * Time_Category,
+                      data = fines_proportion_filtered)
+
+# Step 4: Assess model diagnostics
+
+# Check residuals
+fines_proportion_filtered$residuals <- residuals(beta_model, type = "pearson")
+ggplot(fines_proportion_filtered, aes(x = residuals)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+  geom_density(color = "red", linewidth = 1) +
+  labs(title = "Distribution of Residuals", x = "Residuals", y = "Frequency") +
+  theme_minimal()
+
+# Plot fitted vs residuals
+fines_proportion_filtered$fitted <- fitted(beta_model)
+ggplot(fines_proportion_filtered, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Fitted vs Residuals", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# Summary of the model
+summary(beta_model)
+
+# Export test Summary
+summary_text <- capture.output(summary(beta_model))
+export_summary(summary_text, "Beta Regression of Fines in Pools")
+```
+
+Since you may not be familiar with Beta regression, here are some basics on interpretation for the test output:
+
+- "Optimization failed to converge..." If you see this warning, it may be that there were 0 values across an entire Site. This should be fairly easy to interpret without inferential tests.
+
+- Quantile residuals measure the difference between the actual data and predicted values. The median should be close to 0. Also check the residuals vs fitted plot to ensure there is no clear trend or unusual outliers
+
+- Coefficients (mean model): these are the effects of the predictors (site, time) on the response variable (fine sediment proportion in pools). **Look for significant p values in the last column, particularly for the Site\_\_\_\_\_\:Time\_Category\_\_\_\_\_ row, which is the interaction term (if significant, this means the proportion of fines in residual pools changed over time differently between sites)**. 
+
+- Phi coefficients: there is a p-value here as well, but this refers to whether the spread of the data around the mean was an important feature. If the phi estimate is very high, this means the data was concentrated around the mean (fines proportion doesn't fluctuate much between sites/times). Consider phi of 0.1 to be spread out data, 1 to be moderate, and 10 to be concentrated around the mean.
+
+- Pseudo R-squared: this is how much of the variation in fines in pools can be explained by the site and time variables. Often low in ecological contexts.
+
+Proportional data can be less intuitive to interpret, and using an unfamiliar inferential test might not clear things up. Not to worry: After we perform a similar analysis with the aquatic vegetation data, we will create some plots that show the distribution of fines and aquatics across the reach. These plots are more intuitive and will help you to interpret any changes in greater context. 
+
+# Aquatic Vegetation in Pools
+
+In the field, you may have also estimated the proportion of the wetted width that was occupied by aquatic vegetation. During data wrangling we added three new data columns to facilitate analyses of these aquatic vegetation observations: subveg (submerged vegetation), floatveg (floating vegetation), and emergveg (emergent vegetation). We will use these variables to estimate the length and plan area of each residual pool that would be occupied by aquatic vegetation when flows approach zero. These can be useful metrics for tracking habitat quality and mechanisms of habitat change, however plan area estimates come with a caveat:
+
+<span style="font-size: smaller; margin-left: 20px; display: block;">
+In estimating plan areas of vegetation, we assume that the proportion of residual pool width occupied by vegetation is equal to the proportion of the wetted width that was occupied in the field. In most cases this will be an overestimate because the thalweg will typically have less vegetation and, as flows recede, the thalweg makes up a greater proportion of the wetted width. Although vegetated residual pool areas can be useful for tracking changes over time, because they are based on proportions of wetted widths, you should not consider them flow-independent. When interpreting changes over time (or from different reaches), remember that if flows were notably different, then the amount of submerged vegetation can differ. If you had the time/ability to collect wetted width measurements at each interval this could be used to control for this variation by adding it as a covariate in the inferential test. Otherwise, interpret with caution.
+</span>
+
+Aside from the above, in some cases it can also be difficult to assign proportions consistently in the field, such as when invasive reed canarygras forms dense mats that obscure banks and underlying soils/substrates. If there were such difficulties in the field, these should be clearly stated to aide interpretation. For the purposes of interpretation, remember that in this section we are considering the proportions of the length and the area of *residual pools* that are occupied by aquatic vegetation. As such, the field observations should relate to proportions of wetted width (not bankfull), because at flows approaching zero the vegetation between observed wetted width and bankfull width would not occupy any part of the residual pool. 
+
+🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿
+
+```{r aquatic veg in pools, echo = FALSE}
+calculate_veg_proportion <- function(residuals.df, veg_column, custom_depth = NULL) {
+  # Validate that the vegetation column exists in the residuals dataframe
+  if (!veg_column %in% colnames(residuals.df)) {
+    stop(paste("The column", veg_column, "is not present in the residuals dataframe."))
+  }
+  
+  # Initialize a list to store results
+  veg_proportion_list <- list()
+  
+  # Iterate over each unique combination of Site and Year
+  unique_sites_years <- unique(residuals.df[c("Site", "year")])
+  
+for (i in 1:nrow(unique_sites_years)) {
+  site <- unique_sites_years$Site[i]
+  year <- unique_sites_years$year[i]
+  
+  # Subset the residuals dataframe for the current Site and Year
+  subset_residuals <- residuals.df[residuals.df$Site == site & residuals.df$year == year, ]
+  
+  if (nrow(subset_residuals) == 0) {
+    message(paste("No data for Site:", site, "Year:", year, "- skipping."))
+    next
+  }
+  
+  # Determine the depth threshold (custom or SD)
+  depth_threshold <- if (is.null(custom_depth)) {
+    sd(subset_residuals$residual_depth, na.rm = TRUE)
+  } else {
+    custom_depth
+  }
+  
+  # Print the depth threshold
+  #cat("Depth threshold for Site:", site, "Year:", year, "is:", depth_threshold, "\n")
+  
+    # Filter pools based on depth threshold
+    valid_pools <- subset_residuals %>%
+      group_by(pool_id) %>%
+      filter(max(residual_depth, na.rm = TRUE) > depth_threshold) %>%
+      pull(pool_id) %>%
+      unique()
+    
+    # Subset residuals for valid pools
+    subset_residuals <- subset_residuals[subset_residuals$pool_id %in% valid_pools, ]
+    
+    if (nrow(subset_residuals) == 0) {
+      message(paste("No valid pools for Site:", site, "Year:", year, "- skipping."))
+      next
+    }
+    
+    # Ensure the dataframe is sorted by distance within each pool
+    subset_residuals <- subset_residuals[order(subset_residuals$pool_id, subset_residuals$distance), ]
+    
+# Iterate over each unique pool_id
+unique_pool_ids <- unique(subset_residuals$pool_id)
+for (pool_id in unique_pool_ids) {
+  pool_residuals <- subset_residuals[subset_residuals$pool_id == pool_id, ]
+  
+  # Initialize the segment_length column
+  pool_residuals$segment_length <- NA
+  
+  # Calculate segment lengths
+  for (i in 1:nrow(pool_residuals)) {
+    if (i == 1) {
+      # First point: only half the distance to the next point
+      pool_residuals$segment_length[i] <- (pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2
+    } else if (i == nrow(pool_residuals)) {
+      # Last point: only half the distance to the previous point
+      pool_residuals$segment_length[i] <- (pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2
+    } else {
+      # Middle points: half the distance to the previous and next points
+      pool_residuals$segment_length[i] <- 
+        ((pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2) +
+        ((pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2)
+    }
+  }
+  
+  # Pool metrics
+  pool_length <- sum(pool_residuals$segment_length, na.rm = TRUE)
+  veg_length <- sum(pool_residuals$segment_length[pool_residuals[[veg_column]] > 0], na.rm = TRUE)
+  veg_proportional_length <- veg_length / pool_length
+  veg_proportional_area <- sum(pool_residuals[[veg_column]] * pool_residuals$segment_length, na.rm = TRUE) / pool_length #we do not use residual widths here, which could complicate interpretation (e.g., areas of wetted vegetation greater than the wetted area) without any benefit that we are aware of.
+
+  # Store results
+  veg_proportion_list[[paste(site, year, pool_id, sep = "_")]] <- list(
+    site = site,
+    year = year,
+    pool_id = pool_id,
+    pool_length = pool_length,
+    veg_length = veg_length,
+    veg_proportional_length = veg_proportional_length,
+    veg_proportional_area = veg_proportional_area
+  )
+}
+
+    # Site-Year Totals
+    total_pool_length <- sum(sapply(veg_proportion_list, function(x) if (x$site == site && x$year == year) x$pool_length else 0), na.rm = TRUE)
+    total_veg_length <- sum(sapply(veg_proportion_list, function(x) if (x$site == site && x$year == year) x$veg_length else 0), na.rm = TRUE)
+    total_veg_proportional_length <- total_veg_length / total_pool_length
+    total_veg_proportional_area <- sum(sapply(veg_proportion_list, function(x) if (x$site == site && x$year == year) x$veg_proportional_area * x$pool_length else 0), na.rm = TRUE) / total_pool_length
+    
+    veg_proportion_list[[paste(site, year, "Total", sep = "_")]] <- list(
+      site = site,
+      year = year,
+      pool_id = "Total",
+      pool_length = total_pool_length,
+      veg_length = total_veg_length,
+      veg_proportional_length = total_veg_proportional_length,
+      veg_proportional_area = total_veg_proportional_area
+    )
+  }
+  
+  # Combine into a dataframe
+  veg_proportion_df <- do.call(rbind, lapply(veg_proportion_list, function(x) {
+    data.frame(
+      site = x$site,
+      year = x$year,
+      pool_id = x$pool_id,
+      pool_length = x$pool_length,
+      veg_length = x$veg_length,
+      veg_proportional_length = x$veg_proportional_length,
+      veg_proportional_area = x$veg_proportional_area
+    )
+  }))
+  
+  return(veg_proportion_df)
+}
+```
+The tables generated and exported by the code below will show the proportional length of residual pools in which aquatic vegetation was present (regardless of quantity/width), in the same way that we used the fines data. The tables also show the plan area of residual pools that featured aquatic vegetation, based on your estimates of the proportion of wetted width occupied by vegetation at each interval, integrated along the length of each pool.
+
+Just like for fines, for aquatic vegetation we default to using the full contingent of pools. Our rationale is that vegetation (particularly certain problematic invasive species) can be involved in the process of infilling pools by trapping sediment, and it may be of restoration significance to track changes in vegetation in minor nascent or infilling pools. However, as before, we have included in the code below the ability to select a subset of pools, for example if you want to focus on factors such as the importance of aquatic vegetative cover that would plausibly be used by rearing fish in summer (i.e., only in pools of a certain depth). Our default is 0 (no subsetting), and if you change it, ensure that when comparing systems or years you are comparing like for like.
+
+```{r Aquatic veg custom threshold}
+# Define custom threshold if required. We recommend 0 (all residual pools, regardless of maximum depth)
+custom_depth <- 0  # Replace with your desired threshold in metres, or set to NULL to use the standard deviation of the reach (that year)
+```
+
+```{r Aquatic veg tables, echo = FALSE, message=FALSE}
+# Call the function with the custom depth threshold
+subveg_result <- calculate_veg_proportion(residuals.df, veg_column = "subveg", custom_depth = custom_depth)
+emergveg_result <- calculate_veg_proportion(residuals.df, veg_column = "emergveg", custom_depth = custom_depth)
+floatveg_result <- calculate_veg_proportion(residuals.df, veg_column = "floatveg", custom_depth = custom_depth)
+
+# Extract "Total" rows for each table
+subveg_total <- subveg_result[subveg_result$pool_id == "Total", ]
+emergveg_total <- emergveg_result[emergveg_result$pool_id == "Total", ]
+floatveg_total <- floatveg_result[floatveg_result$pool_id == "Total", ]
+
+# Export the "Total" rows for each vegetation type as CSV files
+export_table(subveg_total, "Reachwide Submerged Veg.csv") #can alter these to subveg_result (etc.) if full data required
+export_table(emergveg_total, "Reachwide Emergent Veg.csv")
+export_table(floatveg_total, "Reachwide Floating Veg.csv")
+
+# Print tables for visualization in RStudio / knit
+kable(subveg_total, caption = "Reachwide Submerged Vegetation for Each Site-Year")
+kable(emergveg_total, caption = "Reachwide Emergent Vegetation for Each Site-Year")
+kable(floatveg_total, caption = "Reachwide Floating Vegetation for Each Site-Year")
+```
+
+## Inferential Tests - Aquatic Veg
+
+Just like with the fines data, we are dealing with data that are bounded by 0 and 1 (for both proportions of length and for area, across each type of vegetation). The non-transformed data would be expected to violate the assumptions of ANOVA, so we omit the initial diagnostic tests. We will again apply Beta regressions.
+
+Below we display the Beta regression model summaries for all vegetation categories (where present), both length and area proportions. We omit the diagnostic plots from the display, but when you run the code for your data, you should examine the plots.
+
+```{r aquatic veg inferentials, echo = FALSE}
+# Function to run Beta regression and diagnostics
+run_beta_regression <- function(data, response_var, dataset_name, summary_list) {
+  # Create the Time_Category
+  data <- data %>%
+    mutate(Time_Category = case_when(
+      year %in% before_years ~ "Before",
+      year %in% after_years ~ "After",
+      TRUE ~ NA_character_
+    ))
+
+  # Filter sites with both time categories and remove "Total"
+  filtered_data <- data %>%
+    filter(pool_id != "Total") %>%
+    group_by(site) %>%
+    filter(all(c("Before", "After") %in% Time_Category)) %>%
+    ungroup()
+
+  # Adjust response variable values of exactly 0 or 1
+  filtered_data <- filtered_data %>%
+    mutate(response_adjusted = case_when(
+      !!sym(response_var) == 0 ~ 0.001,
+      !!sym(response_var) == 1 ~ 0.999,
+      TRUE ~ !!sym(response_var)
+    ))
+
+  # Fit Beta regression model
+  beta_model <- tryCatch(
+    betareg(response_adjusted ~ site * Time_Category, data = filtered_data),
+    warning = function(w) {
+      warning_message <- paste("\nWarning: optimization failed to converge for", response_var, "in", dataset_name, "dataset\n")
+      cat(warning_message)  # Display the warning message
+      return(NULL)
+    }
+  )
+
+  if (!is.null(beta_model)) {
+    # If model converges, capture the summary and display it
+    model_summary <- capture.output(summary(beta_model))
+    
+    # Append the summary to the list
+    summary_list <- c(summary_list, paste("Start of summary for", response_var, "in", dataset_name, "dataset"), model_summary, paste("\n\n\n"))
+    
+    # Print the model summary to the console
+    cat("\n\n\nModel Summary for", response_var, "in", dataset_name, "dataset:\n")
+    print(summary(beta_model))
+  } else {
+    # If model does not converge, just print a message
+    cat("\n\n\nNo model convergence for", response_var, "in", dataset_name, "\n")
+  }
+
+  return(summary_list)
+}
+
+# Define datasets and response variables
+datasets <- list(subveg_result = subveg_result, 
+                 emergveg_result = emergveg_result, 
+                 floatveg_result = floatveg_result)
+response_vars <- c("veg_proportional_length", "veg_proportional_area")
+
+# Initialize an empty list to store all summaries
+all_summaries <- character()
+
+# Run the function for each combination of dataset and response variable
+for (dataset_name in names(datasets)) {
+  for (response_var in response_vars) {
+    all_summaries <- run_beta_regression(datasets[[dataset_name]], response_var, dataset_name, all_summaries)
+  }
+}
+
+# Export all summaries as a single .txt file. Summaries generated within function
+export_summary(all_summaries, "Aquatic Vegetation Beta Regressions")
+```
+
+```{r aquatic veg diagnostic plots, include=FALSE}
+for (dataset_name in names(datasets)) {
+  for (response_var in response_vars) {
+    # Data preprocessing for plotting
+    data <- datasets[[dataset_name]] %>%
+      mutate(Time_Category = case_when(
+        year %in% before_years ~ "Before",
+        year %in% after_years ~ "After",
+        TRUE ~ NA_character_
+      )) %>%
+      filter(pool_id != "Total") %>%
+      mutate(response_adjusted = case_when(
+        !!sym(response_var) == 0 ~ 0.001,
+        !!sym(response_var) == 1 ~ 0.999,
+        TRUE ~ !!sym(response_var)
+      ))
+
+    # Distribution of the response variable
+    print(ggplot(data, aes(x = response_adjusted)) +
+      geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+      geom_density(color = "red", linewidth = 1) +
+      labs(title = paste("Distribution of", response_var, "(Adjusted)", "for", dataset_name),
+           x = paste(response_var, "(Adjusted)"), y = "Frequency") +
+      theme_minimal())
+
+# Add residuals and fitted values for diagnostics
+if (!is.null(beta_model)) {
+  # Extract the data used in the model
+  model_data <- model.frame(beta_model)
+  
+  # Add residuals and fitted values to the model data
+  model_data <- model_data %>%
+    mutate(residuals = residuals(beta_model, type = "pearson"),
+           fitted = fitted(beta_model))
+  
+  # Perform diagnostics
+  # Residuals distribution
+  print(ggplot(model_data, aes(x = residuals)) +
+    geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+    geom_density(color = "red", size = 1) +
+    labs(title = paste("Residuals Distribution for", response_var, "in", dataset_name),
+         x = "Residuals", y = "Frequency") +
+    theme_minimal())
+  
+  # Fitted vs residuals
+  print(ggplot(model_data, aes(x = fitted, y = residuals)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    labs(title = paste("Fitted vs Residuals for", response_var, "in", dataset_name),
+         x = "Fitted Values", y = "Residuals") +
+    theme_minimal())
+}
+
+  }
+}
+```
+
+Here is that basic interpretation assistance from before, but also remember that there is extra nuance now you are dealing with proportions of pool length or proportion of pool plan area.
+
+- "Optimization failed to converge..." If you see this warning, it may be that there were 0 values across an entire Site. This should be fairly easy to interpret without inferential tests.
+
+- Quantile residuals measure the difference between the actual data and predicted values. The median should be close to 0. Also check the residuals vs fitted plot to ensure there is no clear trend or unusual outliers
+
+- Coefficients (mean model): these are the effects of the predictors (site, time) on the response variable (fine sediment proportion in pools). **Look for significant p values in the last column, particularly for the Site\_\_\_\_\_\:Time\_Category\_\_\_\_\_ row, which is the interaction term (if significant, this means the proportion of fines in residual pools changed over time differently between sites)**. 
+
+- Phi coefficients: there is a p-value here as well, but this refers to whether the spread of the data around the mean was an important feature. If the phi estimate is very high, this means the data was concentrated around the mean (fines proportion doesn't fluctuate much between sites/times). Consider phi of 0.1 to be spread out data, 1 to be moderate, and 10 to be concentrated around the mean.
+
+- Pseudo R-squared: this is how much of the variation in fines in pools can be explained by the site and time variables. Often low in ecological contexts.
+
+Next up are the promised plots that show the distribution of fines and aquatics across the reach, which should facilitate interpretation.
+
+# Composite Figure
+
+This figure juxtaposes the plots showing the residual surfaces with the presence/absence record of fine sediments, and with the wetted width proportion of the three categories of aquatic vegetation. Where factors like excess sedimentation, eutrophication, invasive aquatics, excessively fluctuating dissolved oxygen, and/or lack of pool habitat is a concern, this figure should be useful to visually compare reaches or track changes over time. 
+
+Remember that in a BACI study our primary interest is whether our restoration site changed in a different way than the control/reference sites changed across time - this is not always easy to see in figures, so consider the figure alongside the inferential test results from above. Bear in mind that the figure presents data by year whereas our inferential tests consider before vs after time categories.
+
+If you have several sites/years, you can modify the code below to choose which figures are plotted in RStudio. If left at NULL site and NULL year, the code will display all site-years in one composite figure. You can alter this code to display one year for one site, all years for one site, or all sites for one year. 
+
+Regardless of what you view in RStudio, the code will export all individual site-year plots and the full composite figure as html files to your output folder.
+
+```{r specify site and year}
+# User-defined site and year for individual plot display
+selected_site <- NULL # Replace with the desired "site name" (include the quotation marks) or use NULL for all sites
+selected_year <- NULL # Replace with the desired year (no brackets) or use NULL for all years
+```
+
+```{r function creating separate multiplots for each site-year, echo=FALSE}
+# Convert 'year' in dataframes to numeric (if factor, may cause filtering issues)
+residuals.df <- residuals.df %>%
+  mutate(year = as.numeric(as.character(year)))
+
+# Calculate the global y-axis limits for Depth (m) across the entire dataset, for visual comparison on same scaled y-axes
+global_depth_limits <- residuals.df %>%
+  filter(distance >= 0) %>%
+  summarise(
+    global_min_depth = 0,  # keep min depth at 0
+    global_max_depth = max(Thalweg_Depth_m, na.rm = TRUE)   # Calculate maximum depth from the data
+  )
+
+# Function to generate the plots for a given site-year combination
+generate_site_year_plots <- function(residuals.df, site, selected_year, global_min_depth, global_max_depth) {
+  
+  # Filter data for the specific site and year (isolated here)
+  site_year_data <- residuals.df %>%
+    filter(
+        trimws(Site) == trimws(site) & 
+        year == as.numeric(selected_year) & 
+        distance >= 0
+    ) %>%
+    mutate(Fines_presence = ifelse(tolower(Fines) %in% c("y", "yes"), 1, 0))
+  
+  # Define consistent x-axis limits (should be based on the filtered data)
+  x_limits <- range(site_year_data$distance, na.rm = TRUE)
+  
+  # Plot 1: Thalweg Depth and Residual Surface with standardized y-axis
+  plot_residuals <- plot_ly(site_year_data, x = ~distance, y = ~Thalweg_Depth_m, type = 'scatter', mode = 'lines',
+                            name = 'Thalweg Depth', line = list(color = 'black', width = 2)) %>%
+    add_trace(y = ~residual_surface, mode = 'lines', name = 'Residual Surface', line = list(color = 'blue', width = 2)) %>%
+    layout(
+      yaxis = list(
+        title = "Depth (m)", 
+        range = c(global_max_depth, global_min_depth),  # Use global depth limits
+        autorange = FALSE
+      ),
+      xaxis = list(range = x_limits),
+      showlegend = TRUE
+    )
+  
+  # Plot 2: Submerged Vegetation Proportion
+  plot_subveg <- plot_ly(site_year_data, x = ~distance, y = ~subveg, type = 'scatter', mode = 'lines',
+                         line = list(color = 'darkgreen', width = 2), fill = 'tozeroy', fillcolor = 'darkgreen') %>%
+    layout(
+      yaxis = list(title = "Subveg Proportional Cover", range = c(0, 1)),
+      xaxis = list(range = x_limits),
+      showlegend = FALSE
+    )
+  
+  # Plot 3: Floating Vegetation Proportion
+  plot_floatveg <- plot_ly(site_year_data, x = ~distance, y = ~floatveg, type = 'scatter', mode = 'lines',
+                           line = list(color = 'forestgreen', width = 2), fill = 'tozeroy', fillcolor = 'forestgreen') %>%
+    layout(
+      yaxis = list(title = "Floatveg Proportional Cover", range = c(0, 1)),
+      xaxis = list(range = x_limits),
+      showlegend = FALSE
+    )
+  
+  # Plot 4: Emergent Vegetation Proportion
+  plot_emergveg <- plot_ly(site_year_data, x = ~distance, y = ~emergveg, type = 'scatter', mode = 'lines',
+                           line = list(color = 'lightgreen', width = 2), fill = 'tozeroy', fillcolor = 'lightgreen') %>%
+    layout(
+      yaxis = list(title = "Emergveg Proportional Cover", range = c(0, 1)),
+      xaxis = list(range = x_limits),
+      showlegend = FALSE
+    )
+  
+  # Plot 5: Fines Presence/Absence
+  plot_fines <- plot_ly(site_year_data, x = ~distance, y = ~Fines_presence, type = 'scatter', mode = 'lines',
+                        line = list(color = 'burlywood3', width = 2), fill = 'tozeroy', fillcolor = 'burlywood3') %>%
+    layout(
+      yaxis = list(title = "Fine Sediments", tickvals = c(0, 1), ticktext = c('abs', 'pres'), range = c(0, 1)),
+      xaxis = list(title = "distance (m)", range = x_limits),
+      showlegend = FALSE
+    )
+  
+  # Combine the plots into a vertical grid
+  subplot(
+    plot_residuals %>% layout(
+      yaxis = list(
+        title = "Depth (m)", 
+        range = c(global_max_depth, global_min_depth),  # Ensure depth axis is shared
+        autorange = FALSE, 
+        automargin = TRUE
+      )
+    ),
+    plot_emergveg %>% layout(yaxis = list(title = "Emergent Veg\nProportional Cover", range = c(0, 1), automargin = TRUE)),
+    plot_floatveg %>% layout(yaxis = list(title = "Floating Veg\nProportional Cover", range = c(0, 1), automargin = TRUE)),
+    plot_subveg %>% layout(yaxis = list(title = "Submerged Veg\nProportional Cover", range = c(0, 1), automargin = TRUE)),
+    plot_fines %>% layout(yaxis = list(title = "Fine\nSediment", tickvals = c(0, 1), ticktext = c("Abs", "Pres"), automargin = TRUE)),
+    nrows = 5,
+    heights = c(0.5, 0.125, 0.125, 0.125, 0.125),
+    shareX = TRUE,
+    shareY = TRUE  # Share y-axis across all plots
+  ) %>%
+  layout(
+    title = paste(site, selected_year, "Thalweg Longitudinal Profile"),
+    margin = list(t = 50, l = 50, b = 50),  # Increase left margin
+    xaxis = list(title = "distance (m)"),  # Shared x-axis label
+    yaxis = list(title = "Depth (m)", automargin = TRUE, titlefont = list(size=10)),
+    yaxis2 = list(title = "Emerg\nCover", automargin = TRUE, titlefont = list(size=10)),
+    yaxis3 = list(title = "Float\nCover", automargin = TRUE, titlefont = list(size=10)),
+    yaxis4 = list(title = "Sub\nCover", automargin = TRUE, titlefont = list(size=10)),
+    yaxis5 = list(title = "Fines", automargin = TRUE, titlefont = list(size=10))
+  )
+}
+
+# Generate unique site-year combinations
+site_year_combinations <- residuals.df %>%
+  distinct(Site, year) %>%
+  arrange(Site, year)
+
+# Display either the selected site-year plot or all composite plots
+if (!is.null(selected_site) & !is.null(selected_year)) {
+  # Case 1: Specific site-year plot
+  selected_plot <- generate_site_year_plots(
+    residuals.df, selected_site, selected_year,
+    global_depth_limits$global_min_depth, global_depth_limits$global_max_depth
+  )
+  selected_plot  # Display the plot in RStudio
+
+} else if (!is.null(selected_site) & is.null(selected_year)) {
+  # Case 2: All years for a specific site
+  site_plots <- site_year_combinations %>%
+    filter(Site == selected_site) %>%
+    pmap_dfr(function(Site, year) {
+      plot <- generate_site_year_plots(
+        residuals.df, Site, year,
+        global_depth_limits$global_min_depth, global_depth_limits$global_max_depth
+      )
+      tibble(plot = list(plot), year = year)
+    })
+  
+  # Arrange plots for the site across all years
+  combined_site_plot <- subplot(
+    lapply(site_plots$plot, identity),
+    nrows = nrow(site_plots),  # One row per year
+    titleX = FALSE,
+    titleY = TRUE
+  ) %>%
+    layout(title = paste("Plots for Site:", selected_site))
+  combined_site_plot  # Display the plot
+
+} else if (is.null(selected_site) & !is.null(selected_year)) {
+  # Case 3: All sites for a specific year
+  year_plots <- site_year_combinations %>%
+    filter(year == selected_year) %>%
+    pmap_dfr(function(Site, year) {
+      plot <- generate_site_year_plots(
+        residuals.df, Site, year,
+        global_depth_limits$global_min_depth, global_depth_limits$global_max_depth
+      )
+      tibble(plot = list(plot), site = Site)
+    })
+  
+  # Arrange plots for the year across all sites
+  combined_year_plot <- subplot(
+    lapply(year_plots$plot, identity),
+    nrows = nrow(year_plots),  # One row per site
+    titleX = FALSE,
+    titleY = TRUE
+  ) %>%
+    layout(title = paste("Plots for Year:", selected_year))
+  combined_year_plot  # Display the plot
+
+} else {
+  # Case 4: All site-year combinations 
+  composite_plots <- site_year_combinations %>%
+    pmap_dfr(function(Site, year) {
+      plot <- generate_site_year_plots(
+        residuals.df, Site, year,
+        global_depth_limits$global_min_depth, global_depth_limits$global_max_depth
+      )
+      tibble(plot = list(plot), site = Site, year = year)
+    })
+  
+  # Group plots by site
+  site_plots <- composite_plots %>%
+    group_by(site) %>%
+    group_map(function(site_plots, site) {
+      subplot(
+        lapply(site_plots$plot, identity),
+        nrows = 1,  # One row for each site
+        titleX = FALSE,
+        titleY = TRUE
+      ) %>%
+        layout(title = list(text = site, font = list(size = 16)))
+    })
+  
+  # Combine all site rows
+  combined_plot <- subplot(
+    site_plots,
+    nrows = length(site_plots),  # One row per site
+    titleX = TRUE,
+    titleY = TRUE
+  ) %>%
+    layout(title = "Long Profile Composite Plots by Site-Year")
+  
+  combined_plot  # Display the combined plot
+}
+
+# Export ALL individual site-year plots as HTML
+invisible(site_year_combinations %>%
+  pmap(function(Site, year) {
+    plot <- generate_site_year_plots(
+      residuals.df, Site, year,
+      global_depth_limits$global_min_depth, global_depth_limits$global_max_depth
+    )
+    
+    # Save each individual plot as an HTML file
+    export_plot(plot, paste0("Long Profile Composite ", Site, "_", year, ".html"))
+  })
+)
+  
+#export combined plot 
+if (exists("combined_plot")) {
+  export_plot(combined_plot, "Long Profile Composite Plot All Site Years.html")
+}
+```
+
+Now that you have visualisations of the residual pool data, and statistical tests to examine the statistical significance of differences in reach pool characteristics among reaches and years, it is time to consider the biological/morphological significance and the implications for your project.
+
+# Next Steps
+
+We can now move on to looking at a few more components of habitat that may be useful to monitor for your project. We will export the residual pool data we generated in this code for use later on (when considering habitat unit classifications). This will be exported to your output folder (which by now, might be a bit busy. If moving files around, remember that the html files need to be in the same folder as their similarly-named dependency folders).
+
+```{r residuals.df export, echo=FALSE}
+export_table(as.data.frame(residuals.df),"Residuals_dataframe.csv")
+```
+
+# References 
+
+Clark, C., Roni, P. and Burgess, S., 2019. Response of juvenile salmonids to large wood placement in Columbia River tributaries. Hydrobiologia, 842(1), pp.173-190.
+
+Geissinger, E.A., Khoo, C.L., Richmond, I.C., Faulkner, S.J. and Schneider, D.C., 2022. A case for beta regression in the natural sciences. Ecosphere, 13(2), p.e3940.
+
+Kaufmann, P.R., Levine, P., Peck, D.V., Robison, E.G. and Seeliger, C., 1999. Quantifying physical habitat in wadeable streams (p. 149). USEPA [National Health and Environmental Effects Research Laboratory, Western Ecology Division].
+
+Lisle, T.E., 1986. Effects of woody debris on anadromous salmonid habitat, Prince of Wales Island, southeast Alaska. North American Journal of Fisheries Management, 6(4), pp.538-550.
+
+Lisle, T.E., 1987. Using" residual depths" to monitor pool depths independently of discharge. Res. Note PSW-RN-394. Berkeley, CA: US Department of Agriculture, Forest Service, Pacific Southwest Forest and Range Experiment Station. 4 p, 394.
+
+Mossop, B. and Bradford, M.J., 2006. Using thalweg profiling to assess and monitor juvenile salmon (Oncorhynchus spp.) habitat in small streams. Canadian Journal of Fisheries and Aquatic Sciences, 63(7), pp.1515-1525.
+
+Robison, E.G., 1998. Reach scale sampling metrics and longitudinal pattern adjustment of small streams. PhD Thesis. Oregon State University.
+
+Stack, W.R., 1988. Factors influencing pool morphology in Oregon coastal streams. MSc Thesis. Oregon State University

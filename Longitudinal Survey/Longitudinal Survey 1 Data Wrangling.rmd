@@ -1,0 +1,364 @@
+---
+title: "Longitudinal Survey 1 Data Wrangling"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(DT, tidyverse, dplyr, purrr, htmlwidgets, lubridate, update=F)
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+```
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Staff                 = "character",
+    Location_Code         = "character",
+    Thalweg_Depth_m       = "numeric",
+    HU_Primary            = "character",
+    HU_Secondary          = "character",
+    Fines                 = "character",
+    Nodes                 = "character",
+    Aquatic_Veg           = "character",
+    subveg                = "numeric",
+    emergveg              = "numeric",
+    floatveg              = "numeric",
+    Notes                 = "character",
+    Standard_Interval_m   = "numeric",
+    Start_WPT             = "character",
+    Start_Latitude        = "character",
+    Start_Longitude       = "character",
+    End_WPT               = "character",
+    End_Latitude          = "character",
+    End_Longitude         = "character",
+    Slope_Mean            = "numeric"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+    return(df)
+}
+```
+
+Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
+
+You should be approaching data analysis with a set of established hypotheses, predictions, and plans for the various outcomes. If you are not familiar with the importance of *a priori* hypotheses and the dangers of data dredging, please spend some time reading up on these. Only once you have your hypotheses and predictions in mind (and ideally on paper) should you continue. We recommend revisiting your predictions and interpretations of possible outcomes before you run every single statistical test.
+
+# Guidance Format
+
+We have written these data analysis scripts in R markdown (.rmd files) and printed them as .html documents. As **Step 1** we recommend that you read through the .html files, which we printed using some example data. The .html files contain all the written guidance, but omit most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+# Data Wrangling
+
+This data wrangling script is the first step in analysing data. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+The first step is to combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and/or one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Your thalweg depth measurements should be in metres and be positive, and the sequence of rows (from top to bottom of your file) should reflect the downstream to upstream sequence of field measurements.
+
+In your dataframe you may have several columns that include notes (e.g. aquatic vegetation) which will need to be summarised before analysis. Take the time to **do this now**. It is probably simplest to summarise this data in familiar spreadsheet software, like excel. Add columns 'subveg', 'emergveg', 'floatveg', in which you will enter the proportion (0 to 1; 2dp) of the wetted width that was recorded as containing submergent, emergent, and floating aquatic vegetation.
+
+Depending on the project objectives, it may be useful to go further and (e.g.) explore aquatic vegetation by species or status (invasive/exotic, hydrophyte etc.). To ensure consistency with species names, we recommend using BC plant codes, available from [BC Species Explorer](https://www.for.gov.bc.ca/hre/becweb/resources/codes-standards/standards-species.html). Invasive status and Hydrophyte status should be based on local knowledge if you are familiar with the species and the standard definitions for 'hydrophyte', 'obligate', 'facultative (wetland)' etc. If you are unsure of hydrophytic status, you can look up plants at [USDS Plant Database](https://plants.usda.gov/home):
+enter plant name at the search box in the top left. Once you are at the plant's page, select the 'wetland' tab, and read wetland status based on most appropriate Region for you (e.g., Alaska or Western Mountains, Valleys, and Coast). We have not yet created code for this, but may be able to do so if there is enough demand.
+
+Once you have converted your notes to new columns with numerical or categorical data, we will upload the file(s). 
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Longitudinal/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+It may be necessary to subset within this dataframe if, e.g., you included more than one channel in your .csv files (surveys of multiple side-channels, tribs etc.). These scripts are intended to analyse one focal channel per reach, to compare it over time and with independent reference reaches that also feature one channel each. The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways. 
+
+``` {r subset option}
+# df <- subset(df, Site %in% c("Hatchery Channel", "Brousseau Channel")) 
+
+# if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channel within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
+```
+
+Let's take a look at the dataframe. 
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+Take a look through the dataframe and ensure there are no errors and to explore unusual entries. In some places, you may have missing entries or 'NA', when a value of '0' is more appropriate. For example, where you did not record any submerged vegetation this is presumably because there was '0' presence, and this absence of vegetation is informative. In such cases, we automatically will replace missing entries with '0'.
+
+```{r missing values, echo = FALSE}
+df$subveg <- ifelse(is.na(df$subveg), 0, df$subveg) ## alter to suit your column names, if necessary
+df$emergveg <- ifelse(is.na(df$emergveg), 0, df$emergveg)
+df$floatveg <- ifelse(is.na(df$floatveg), 0, df$floatveg)
+```
+
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we also isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to ymd, myd, dym, etc.):
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$year <- year(df$parsed_date)        # Extract the year
+```
+
+```{r fines tidying, echo = FALSE}
+# this chunk just tries to tidy different ways that fines may have been recorded. Also considers blank entries 'N' (absence) if any Y/N is entered within that site during that year
+
+df <- df %>%
+  mutate(Fines = case_when(
+    tolower(Fines) %in% c("y", "yes", "p") | grepl("pr", tolower(Fines)) ~ "Y",   # Matches 'y', 'yes', 'p' or any text containing 'pr'
+    tolower(Fines) %in% c("n", "no", "a") | grepl("ab", tolower(Fines)) ~ "N",   # Matches 'n', 'no', 'a' or any text containing 'ab'
+    TRUE ~ as.character(Fines)  # Keep NAs and other values as they are
+  )) %>%
+  # Group by Site and year
+  group_by(Site, year) %>%
+  # Apply rules to fill in NAs
+  mutate(Fines = case_when(
+    # If there are no Y or N values, set all Fines to NA
+    all(is.na(Fines) | Fines == "NA") ~ NA_character_,
+    # If there are any Y or N, replace remaining blanks with N
+    TRUE ~ if_else(is.na(Fines), "N", Fines)
+  )) %>%
+  ungroup()
+```
+
+
+# Distance Variable
+We are now going to generate a distance variable, with the measurement at the downstream end of the reach at distance = 0, then proceeding upstream along the thalweg. This will be useful for calculating pool and planform metrics, and displaying figures. We will here assume that all of the extra intermediate measurements ('X' coded; where pool outlets or pool maxima occurred between regular intervals) are exactly halfway between their adjacent measurements.
+
+Note that you will have to add to the code chunk below: add the name of each reach ("Site") and the standard interval spacing (in metres) for each of the years that data were collected for all your reaches. There is an example included, so overwrite this with your data.
+
+For example our Hatchery Channel was surveyed in 2024 at 1 m intervals and 2025 at 1 m intervals. We had four reaches of interest, and at one of them we failed to get data in 2025. You will need to add/remove rows in the code (Sites), and/or years (lists within brackets) to reflect your data. Take care to preserve the formatting - brackets and commas can easily be missed or left redundant and cause errors.
+ 
+```{r provide interval spacings by site and year}
+# Here you create named lists for interval spacings by Site and year. If you add sites (rows), remember to end the preceding row with a ,
+site_year_spacings <- list(
+  `Hatchery Channel` = list(`2024` = 1, `2025` = 1), 
+  `Brousseau Channel` = list(`2024` = 1, `2025` = 1)
+  )
+```
+
+```{r distance variable calculation, echo = FALSE}
+# Ensure all Site-Year combinations have spacing specified
+unique_combinations <- df %>%
+  select(Site, year) %>%
+  distinct()
+
+missing_combinations <- unique_combinations %>%
+  rowwise() %>%
+  mutate(missing = is.null(site_year_spacings[[Site]][[as.character(year)]])) %>%
+  filter(missing) %>%
+  select(Site, year)
+
+if (nrow(missing_combinations) > 0) {
+  stop(paste(
+    "Spacing values must be specified for all Site-Year combinations. Missing combinations:",
+    paste(paste(missing_combinations$Site, missing_combinations$year, sep = "-"), collapse = ", ")
+  ))
+}
+
+# Function to get spacing for a specific Site-Year combination
+get_spacing <- function(site, year) {
+  site_year_spacings[[site]][[as.character(year)]]
+}
+
+# Define the function to generate distances
+generate_distance <- function(df) {
+  df <- df %>%
+    group_by(Site, year) %>%  # Process each Site-Year group separately
+    mutate(
+      distance = {
+        n <- n()  # Number of rows in the group
+        dist <- numeric(n)  # Initialize the distance vector
+        dist[1] <- 0  # Start the first distance at 0
+
+        for (i in 2:n) {
+          current_spacing <- spacing[i]  # Use the spacing for the current row
+          if (grepl("X", Location_Code[i])) {  # "X" row distance is halfway between preceding and following rows
+            dist[i] <- dist[i - 1] + current_spacing / 2
+          } else if (i > 1 && grepl("X", Location_Code[i - 1])) {  # Row following an "X"
+            dist[i] <- dist[i - 1] + current_spacing / 2
+          } else {  # Regular spacing
+            dist[i] <- dist[i - 1] + current_spacing
+          }
+        }
+
+        dist  # Assign the calculated distances
+      }
+    ) %>%
+    ungroup()  # Remove grouping
+
+  return(df)
+}
+
+# Apply site-year specific spacings and calculate distances
+df <- df %>%
+  group_by(Site, year) %>%  # Group by Site and year
+  mutate(spacing = get_spacing(first(Site), first(year))) %>%  # Add site-year specific spacing
+  ungroup()  # Remove grouping
+
+# Call the generate_distance function
+df <- generate_distance(df)
+```
+
+# Export Data
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/Longitudinal"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+At this point, when running the code in RStudio, you will be prompted to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from these scripts. Some of the outputs (dataframes) will be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. ~/Git/Core Monitoring/standardised protocols/data_tidier). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+
+## Export Tidied Dataframe
+
+Now we know the location, we will export this dataframe to your output folder so that it can be used in future analyses.
+```{r df export, echo = FALSE}
+export_table(as.data.frame(df),"Long_dataframe.csv")
+```
+
+Check your file folder and the .csv files to see the data you exported. Then move on to *'Longitudinal Survey 2 Water Depths'*.
+
+

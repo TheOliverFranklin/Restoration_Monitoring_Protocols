@@ -1,0 +1,2 @@
+﻿"DELETE THIS ENTIRE ROW BEFORE IMPORTING TO R. DO NOT CHANGE COLUMN NAMES. EACH ROW REPRESENTS A MEASUREMENT INTERVAL. SEE 'Longitudinal-Survey-1-Data-Wrangling.html' FOR INFO ON 'subveg', 'emergveg', 'floatveg'. COLUMNS TO RIGHT OF 'NOTES' DO NOT REQUIRE VALUES AT EACH ROW UNLESS MULTIPLE VALUES EXIST IN DATAFRAME",,,,,,,,,,,,,,,,,,,,,
+Site,Date,Staff,Location_Code,Thalweg_Depth_m,HU_Primary,HU_Secondary,Fines,Nodes,Aquatic_Veg,subveg,emergveg,floatveg,Notes,Standard_Interval_m,Start_WPT,Start_Latitude,Start_Longitude,End_WPT,End_Latitude,End_Longitude,Slope_Mean

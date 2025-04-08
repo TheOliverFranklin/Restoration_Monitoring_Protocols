@@ -1,0 +1,417 @@
+---
+title: "Longitudinal Survey 4 Planform Complexity"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=9, echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(geosphere, DT, tidyverse, dplyr, tidyr,ggplot2,knitr,gridExtra, htmlwidgets, cowplot, leaflet, sf, update=F)
+```
+
+```{r export functions and folder, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+
+# below code to confirm an output folder is already specified, OR will request it is specified in R (interactively via readline)
+# authors output folder: "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+# BUT if you want to knit, you will need to specify a default location (within the 'else' term)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+Planform complexity metrics are useful for comparing aspects of stream condition and habitat heterogeneity. Because these metrics are typically expressed at the level of the reach, to make statistical inferences one would require a sample of numerous reaches and/or numerous years. If you have access to such data, a mixed-effects model would be a suitable approach that accounts for the correlation between repeated measurements at each reach. We have not included these tests in this script, but we hope in future to include this in scripts focused on analysing time-series of data. 
+
+In general, we feel that visualisations and summary statistics can provide sufficient information to interpret whether your restoration project had the intended influence with regards to planform complexity. Changes in planform complexity are often conspicuous and may be associated with lower-frequency events. As such, your strongest support for your project may come from recognition of a trend in a metric over time (rather than an individual episode), that is not evident in your control/reference reach.
+
+For this script we will import the tidied dataframe, which was exported to your output folder in the Data Wrangling script.
+
+```{r import data, echo=FALSE}
+importeddata <- file.path(output_folder, "Long_dataframe.csv")
+df <- read.csv(importeddata)  
+
+## if you need to specify a different location to import from, use below code:
+# importeddata<-read.csv("~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal/Long_dataframe.csv") # specify your file location & name here
+# df<-data.frame(importeddata)
+```
+We now need to you to provide some GPS coordinates in the below code chunk. For each year at each reach, you will enter the x,y coordinates (in decimal degrees) of the downstream/first thalweg measurments and of the upstream/final thalweg measurements. Data is entered in vectors of equal length and following the same sequence. Check the table and map that are generated to ensure the data is entered correctly.
+
+``` {r input constants}
+# update the below rows so that they correspond to your site(s), year(s), and GPS lat/long for both start and end of thalweg measurements. You can add or remove entries within the list in brackets if you have more/fewer sites and years
+constants_df <- data.frame(
+  Site = c("Hatchery Channel", "Hatchery Channel", "Brousseau Channel", "Brousseau Channel"),  # Edit / Add your site names
+  year = c(2024, 2025, 2024, 2025),  # Corresponding years for each site
+  GPSstart_lat = c(18.107629, 18.107644, 51.57816, 51.57814), # latitude (x value) of 1st (downstream) thalweg measurement at each site-year
+  GPSstart_lon = c(-89.813950, -89.813954, -1.56655, -1.56656), # longitude (y value) of 1st (downstream) thalweg measurement at each site-year 
+  GPSend_lat = c(18.108429, 18.108433, 51.57733, 51.57732), # latitude (x value) of last (upstream) thalweg measurement at each site-year
+  GPSend_lon = c(-89.814509, -89.814500, -1.56686, -1.56684) # longitude (y value) of last (upstream) thalweg measurement at each site-year
+)
+```
+```{r GPS, echo = FALSE}
+#view the constants dataframe
+print(constants_df)
+
+# Function to get constants for a specific Site and year 
+get_constants <- function(site, year) {
+  constants_row <- constants_df[constants_df$Site == site & constants_df$year == year, ]
+  
+  if (nrow(constants_row) == 0) {
+    stop(paste("No constants found for Site:", site, "year:", year))
+  }
+    
+  # Extract constants
+  spacing <- constants_row$spacing
+  GPSstart_lat <- constants_row$GPSstart_lat
+  GPSstart_lon <- constants_row$GPSstart_lon
+  GPSend_lat <- constants_row$GPSend_lat
+  GPSend_lon <- constants_row$GPSend_lon
+  
+  return(list(spacing = spacing, GPSstart_lat = GPSstart_lat, GPSstart_lon = GPSstart_lon, GPSend_lat = GPSend_lat, GPSend_lon = GPSend_lon))
+}
+
+# Create a leaflet map
+map <- leaflet(data = constants_df) %>%
+  addTiles(group = "OpenStreetMap") %>%  # Adds the default OpenStreetMap base layer
+  addProviderTiles("Esri.WorldImagery", group = "World Imagery") %>% # add basemap layers; will toggle between both
+  # Add markers for each site
+  addMarkers(
+    lat = constants_df$GPSstart_lat,
+    lng = constants_df$GPSstart_lon,
+    popup = paste("Site: ", constants_df$Site, "<br>Start Latitude: ", constants_df$GPSstart_lat, "<br>Start Longitude: ", constants_df$GPSstart_lon)
+  ) %>%
+  addMarkers(
+    lat = constants_df$GPSend_lat,
+    lng = constants_df$GPSend_lon,
+    popup = paste("Site: ", constants_df$Site, "<br>End Latitude: ", constants_df$GPSend_lat, "<br>End Longitude: ", constants_df$GPSend_lon)
+  )%>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap"," World Imagery"), # basemap toggle options 
+    options = layersControlOptions(collapsed = F)) # Keep layers control open
+
+# Display the map
+map
+```
+
+# Sinuosity
+
+Sinuosity is calculated by dividing the thalweg line length by the straight-line distance between the start and end points of the thalweg longitudinal survey. This is based on Rosgen (1994), but using the thalweg:stream length ratio, rather than the stream length:valley length ratio. The metric used here has been applied widely (e.g., Roni et al 2024), but is distinct from Rosgen's. We generate here (and export to your output folder) a table of sinuosity and a simple figure to illustrate change over time.
+
+```{r sinuosity, echo = FALSE}
+# Create an empty data frame to store results
+sinuosity_results <- data.frame(Site = character(), year = numeric(), 
+                                Straight_Line_Distance = numeric(), 
+                                Thalweg_Line_Length = numeric(), 
+                                Sinuosity = numeric(), 
+                                stringsAsFactors = FALSE)
+
+# Loop through each unique Site and Year combination
+for (i in 1:nrow(constants_df)) {
+  
+  site <- constants_df$Site[i]
+  year <- constants_df$year[i]
+  
+  ## Debugging: Check if site and year are extracted correctly
+  #print(paste("Processing Site:", site, "year:", year))
+  
+  # Retrieve constants for the current Site and Year
+  constants <- get_constants(site, year)
+  
+  # Calculate the straight-line distance in meters
+  straight_line_distance <- distm(c(constants$GPSstart_lon, constants$GPSstart_lat),
+                                  c(constants$GPSend_lon, constants$GPSend_lat),
+                                  fun = distHaversine)
+  
+   #  retrieve the maximum thalweg line length
+   site_year_df <- df[df$Site == site & df$year == year, ]
+   thalweg_line_length <- max(site_year_df$distance, na.rm = TRUE)  #
+  
+  # Calculate sinuosity
+  sinuosity <- thalweg_line_length / straight_line_distance
+  
+  # Store the results for this Site and Year
+  sinuosity_results <- rbind(sinuosity_results, 
+                             data.frame(Site = site, year = year, 
+                                        Straight_Line_Distance = straight_line_distance, 
+                                        Thalweg_Line_Length = thalweg_line_length, 
+                                        Sinuosity = sinuosity))
+}
+
+# Display the results table
+sinuosity_table<-datatable(sinuosity_results, 
+          options = list(
+            pageLength = 10,          # Number of rows to show per page
+            autoWidth = TRUE,         # Automatically adjust column widths
+            searching = TRUE,         # Enable the search box
+            ordering = TRUE,          # Enable sorting of columns
+            columnDefs = list(list(
+              targets = 0,            # This will affect the first column (e.g., 'Site')
+              className = 'dt-center' # Center align the first column
+            ))
+          ), 
+          caption = "Sinuosity Results by Site and Year"
+)%>%
+formatRound(columns = c("Sinuosity", "Straight_Line_Distance"), digits = 3) 
+ 
+sinuosity_table
+
+#visualisation
+ggplot_plot<-ggplot(sinuosity_results, aes(x = factor(year), y = Sinuosity, color = Site, group = Site)) +
+  geom_line() +  # Draw lines for each Site across years
+  geom_point() +  # Add points to mark individual site-year combinations
+  labs(title = "Sinuosity Over Time by Site", 
+       x = "year", 
+       y = "Sinuosity") +
+  theme_minimal() +  # Use a clean theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for clarity
+  scale_color_brewer(palette = "Set1")  # 
+#display plot in RStudio
+ggplot_plot
+
+# Export table
+export_table(as.data.frame(sinuosity_results), "Sinuosity by Site and Year.csv")
+#export plot
+export_plot(ggplot_plot, "Sinuosity Over Time by Site.pdf")
+```
+
+# Nodes
+
+Here we generate some metrics relating to the nodes that were observed in the field. By node, we mean any confluence or bifurcation from the focal channel, with the subordinate channel being separated from the focal channel by an island (area above bankfull elevation). We limited the information that we collected on nodes in the field for logistical reasons, but one could go further and count the nodes of subordinate channels, measure lengths of side channels etc. Our data are limited to nodes that are observable from the focal channel. 
+
+```{r nodes, echo = FALSE}
+# 1. Create all possible combinations of Site and Year
+all_sites_years <- df %>%
+  distinct(Site, year)  # Ensure each Site-year combination exists
+
+# 2. Process the nodes and calculate the metrics for those that have nodes
+nodes_df <- df %>%
+  filter(!is.na(Nodes) & Nodes != "-" & Nodes != "0") %>%
+  mutate(
+    # Extract node characteristics
+    Type = substr(Nodes, 3, 3),  # Extract type (C or B)
+    WetDry = substr(Nodes, 4, 4)  # Extract wet/dry (W or D)
+  )
+
+# 3. Group by Site and Year to calculate metrics for each combination
+node_metrics <- nodes_df %>%
+  group_by(Site, year) %>%
+  summarise(
+    node_count = n(),
+    # Only calculate stream_length if there are valid distance values
+    stream_length = ifelse(all(is.na(distance)), NA, diff(range(distance, na.rm = TRUE))),
+    node_density = ifelse(is.na(stream_length) | stream_length == 0, 0, (node_count / stream_length) * 100),
+    proportion_confluent = mean(Type == "C"),
+    proportion_wetted = mean(WetDry == "W"),
+   # proportion_wetted_bifurcation = mean(WetDry == "W" & Type == "B"), # decided against this... probably too abstract
+    .groups = "drop"  # Avoid keeping the grouping structure after summarizing
+  )
+
+# 4. Left join to include all sites and years, even those without nodes
+node_metrics_full <- all_sites_years %>%
+  left_join(node_metrics, by = c("Site", "year"))
+
+# 5. Handle missing values (NA), for example, setting default for sites with no nodes
+node_metrics_full <- node_metrics_full %>%
+  mutate(
+    node_count = ifelse(is.na(node_count), 0, node_count),
+    node_density = ifelse(is.na(node_density), 0, node_density),
+    proportion_confluent = ifelse(is.na(proportion_confluent), 0, proportion_confluent),
+    proportion_wetted = ifelse(is.na(proportion_wetted), 0, proportion_wetted)#,
+    # proportion_wetted_bifurcation = ifelse(is.na(proportion_wetted_bifurcation), 0, proportion_wetted_bifurcation)  # decided against this... too abstract
+  )
+
+node_metrics_full <- node_metrics_full %>%
+  select(-stream_length)
+
+# View the expanded node metrics for all sites and years
+node_table<-datatable(node_metrics_full, 
+          options = list(
+            pageLength = 10,          # Number of rows to show per page
+            autoWidth = TRUE,         # Automatically adjust column widths
+            searching = TRUE,         # Enable the search box
+            ordering = TRUE,          # Enable sorting of columns
+            columnDefs = list(list(
+              targets = 0,            # This will affect the first column (e.g., 'Site')
+              className = 'dt-center' # Center align the first column
+            ))
+          ), 
+          caption = "Node Metrics by Site and Year"
+)%>%
+formatRound(columns = c("node_density", "proportion_confluent", "proportion_wetted"), digits = 3)  # 
+
+node_table
+
+# Export table
+export_table(as.data.frame(node_metrics_full), "Node Metrics by Site and Year.csv")
+```
+
+The table above provides some metrics that may be of interest if the restoration objectives include an alteration to the branching density or pattern of the stream (e.g., see Stefankiv et al 2019). Number and density of nodes may represent floodplain habitat area or aquatic complexity, and would be greater in anastomosing channels than more channelised reaches.
+
+Depending on the nature of the system, it may also be of interest to investigate the proportion of nodes that are confluences versus bifurcations, or the proportion that are wetted during periods of low flow / survey timing. Remember that wetted proportion is flow-dependent and comparisons among years/reaches may not be valid without quantitative flow information or well-matched reference sites.
+
+# River Complexity Index
+
+The River Complexity Index (RCI) represents a distinct aspect of variability that is not captured with a thalweg profile, and is based on both sinuosity and node density (Brown 2002). The formula we use is: 
+
+<div style="text-align:center;">
+$RCI = \dfrac{T*(1+J)}{S^2}*100$
+</div>
+
+where **T** = thalweg line length, **J** = number of nodes on the main channel, and  **S** = single straight line distance along the reach. 
+
+Note that the above formula differs from that proposed by Brown (2002) as, for a given sinuosity value, our approach 'penalises' longer reaches by assigning a lower RCI (which is consistent with recent restoration literature, e.g. Roni et al 2024). The penalisation of longer reaches is intended to reflect the fact that over longer distances streams have more opportunities for complexity due to (e.g.) varying substrate types, slopes, tributaries, constraining features. Although the intention for restoration effectiveness monitoring is to compare near-identical control/reference sites, this approach recognises that sometimes the best available reference site may differ in length.
+
+The RCI increases in value with complexity as more sinuosity and/or a greater number of nodes are present. The intention is to compare RCI among your sites and across time, and with other streams that have collected data following our methods. It is important to note that differences in data collection approaches can preclude comparisons among RCI from different studies. For example, we count nodes only along the focal channel, and we use straight line length to standardise reach length (contrasting to the use of stream centreline in Roni et al. 2024).
+
+```{r RCI, echo = FALSE}
+# Create a full list of site-year combinations (including those without nodes)
+full_site_year <- expand.grid(Site = unique(df$Site), 
+                              year = unique(df$year))
+
+# Merge with the node metrics to ensure every site-year combination is included
+node_metrics_full <- full_site_year %>%
+  left_join(node_metrics, by = c("Site", "year")) %>%
+  left_join(sinuosity_results, by = c("Site", "year"))
+
+# Calculate RCI for all site-year combinations (including those without nodes)
+rci_results <- node_metrics_full %>%
+  mutate(
+    # Check if node_count is NA (i.e., no nodes), set to 0 for those rows
+    node_count = ifelse(is.na(node_count), 0, node_count),
+    # Calculate RCI (keeping the same formula, but handling missing values)
+    RCI = ifelse(is.na(Thalweg_Line_Length) | is.na(Straight_Line_Distance), 
+                 NA, 
+                 (Thalweg_Line_Length * (1 + node_count)) / (Straight_Line_Distance^2) * 100)
+  )
+# Remove the stream_length column from the RCI results table
+rci_results_clean <- rci_results %>%
+  filter(!is.na(Thalweg_Line_Length)) %>%  # Remove rows with NA Thalweg_Line_Length
+  select(-stream_length, -Straight_Line_Distance, -Thalweg_Line_Length)  # Exclude the stream_length column (incorrect if no nodes), and others to tidy
+
+# Display the cleaned RCI results
+RCI_table<-datatable(rci_results_clean, 
+          options = list(
+            pageLength = 10,          # Number of rows to show per page
+            autoWidth = TRUE,         # Automatically adjust column widths
+            searching = TRUE,         # Enable the search box
+            ordering = TRUE,          # Enable sorting of columns
+            columnDefs = list(list(
+              targets = 0,            # This will affect the first column (e.g., 'Site')
+              className = 'dt-center' # Center align the first column
+            ))
+          ), 
+          caption = "River Complexity Indices by Site and Year"
+)%>%
+formatRound(columns = c("Sinuosity", "RCI"), digits = 3)  # 
+
+RCI_table
+
+#plot of RCI
+rci_results <- rci_results %>%
+  mutate(observation = row_number())
+
+# Plot the RCI values
+ggplot_plot<-ggplot(rci_results, aes(x = factor(year), y = RCI, color = Site, group = Site)) +
+  geom_line() +  # Draw lines for each Site across years
+  geom_point() +  # Add points to mark individual site-year combinations
+  labs(title = "RCI Over Time by Site", 
+       x = "year", 
+       y = "RCI") +
+  theme_minimal() +  # Use a clean theme
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate x-axis labels for clarity
+  scale_color_brewer(palette = "Set1")  # 
+#display plot in RStudio
+ggplot_plot
+
+# Export table
+export_table(as.data.frame(rci_results), "River Complexity Index by Site and Year.csv")
+#export plot
+export_plot(ggplot_plot, "River Complexity Index Over Time by Site.pdf")
+```
+
+# References
+
+Brown, A. G. 2002. Learning from the past: paleohydrology and paleoecology. Freshwater Biology 47:817–829
+
+Roni, P., Burgess, S., Ross, K., Clark, C., Kvistad, J., Krall, M., Camp, R., Arams, A. and Camp, M.J., 2024. Evaluation of floodplain restoration projects in the interior Columbia River basin using a combination of remote sensing and field data. Canadian Journal of Fisheries and Aquatic Sciences, (ja).
+
+Rosgen, D.L., 1994. A classification of natural rivers. Catena, 22(3), pp.169-199.
+
+Stefankiv, O., T. J. Beechie, J. E. Hall, G. R. Pess, and B. Timpane-Padgham. 2019. Influences of valley form and land use on large river and floodplain habitats in Puget Sound. River Research and Applications 35(2):133–145

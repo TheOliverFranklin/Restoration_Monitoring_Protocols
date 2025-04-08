@@ -1,0 +1,811 @@
+---
+title: "Longitudinal Survey 5 Habitat Units"
+author: "Oliver Franklin & Nicci Zargarpour"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=9, echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(geosphere, DT, tidyverse, dplyr, tidyr,ggplot2,knitr,gridExtra,kableExtra, plotly,cowplot,RColorBrewer,htmlwidgets,  update=F)
+```
+
+```{r export functions and folder, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+
+# below code to confirm an output folder is already specified, OR will request it is specified in R (interactively via readline)
+# authors output folder: "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+# BUT if you want to knit, you will need to specify a default location (within the 'else' term)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+In this section we will focus on the habitat units assigned in the field: their diversity, some indicators of habitat heterogeneity/quality, and how they relate to our residual pool determinations.
+ 
+We have intentionally kept the habitat unit section distinct from other metrics. This is because assigning habitat units in the field requires expertise and judgement, with a greater degree of subjectivity than the other data collected. Because the nature of restoration monitoring often spans many years, it is unlikely that all measurements at one site would be conducted by the same person, even if that same person were capable of perfect consistency. As such, interpretation of field-assigned habitat unit data should be undertaken with a larger degree of caution, and with reference to field notes and photos where available. 
+
+Having said that, most people interested in streams are perfectly capable of identifying pools from riffles, presence of debris jams, etc. In the field people are able to integrate a variety of information (water velocity, roughness, depth, sound, taste, etc.) to assign habitats. In contrast, our residual pool code makes objective inferences based only on water depths and slope. As such, you may observe differences in the habitat unit and residual pool assignments (e.g., where a field-assigned riffle is present within a code-assigned residual pool). Hopefully, any such differences are relatively minor and, regardless, this should not effect our ability to track change over time (or compare similar habitats) within each approach. 
+
+First we will import the dataframe containing the residual pool information, which we exported to your output folder from the Residual Pool script.
+
+```{r import data, echo=FALSE}
+importeddata <- file.path(output_folder, "Residuals_dataframe.csv")
+residuals.df <- read.csv(importeddata)  
+
+## if you need to specify a different location to import from, use below code:
+# importeddata<-read.csv("~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal/Residuals_dataframe.csv") # specify your file location & name here
+# residuals.df<-data.frame(importeddata)
+```
+In the field you may have recorded primary and secondary habitat units. We will focus only on primary habitat units at this point. The habitat codes that you recorded in the field will be used in the analysis, but we recognise that there may also be habitat types that fall outside of the habitat classification system applied in the field protocol. For example, when channels are artificially created, modified, or heavily degraded by invasive vegetation / altered flow / sediment regimes etc., some areas of slow-water habitat may not resemble natural scoured/dammed pools. If you have encountered cases of slow water that you could not comfortably classify, we will introduce the code 'SLOW' to represent these conditions, and we will consider this a type of 'dammed pool' for the sake of analyses.
+
+As a reminder, the habitat codes we assigned in the field were:
+
+##### Habitat Unit Codes:
+
+| Category | Habitat Unit Codes |
+| :---: | :--- |
+| Fast water | Falls = F <br>Cascade = CA<br>Rapids = RAP<br>Riffle = RIF<br>Chute = CH<br>Sheet = SH<br>Run = RUN |
+| Scour Pools | Eddy = ED<br>Trench = TR<br>Mid-channel = MID<br>Convergence = CON<br>Lateral = LAT<br>Plunge = PL |
+| Dammed Pools | Debris dam = DEB<br>Beaver dam = BEA<br>Landslide = LAN<br>Backwater = BAC<br>Abandoned Channel = AB |
+
+```{r habitat code alignment, echo = FALSE}
+#this code attempts to correct/align the codes with those listed above. There is lots of potential for character strings we did not predict
+residuals.df <- residuals.df %>%
+  mutate(HU_Primary = case_when(
+    grepl("falls", HU_Primary, ignore.case = TRUE) ~ "F",
+    grepl("casc.*", HU_Primary, ignore.case = TRUE) ~ "CA",
+    grepl("rapid.*", HU_Primary, ignore.case = TRUE) ~ "RAP",
+    grepl("riff.*", HU_Primary, ignore.case = TRUE) ~ "RIF",
+    grepl("chute", HU_Primary, ignore.case = TRUE) ~ "CH",
+    grepl("sheet", HU_Primary, ignore.case = TRUE) ~ "SH",
+    grepl("run", HU_Primary, ignore.case = TRUE) ~ "RUN",
+    grepl("eddy", HU_Primary, ignore.case = TRUE) ~ "ED",
+    grepl("trench", HU_Primary, ignore.case = TRUE) ~ "TR",
+    grepl("mid.?channel", HU_Primary, ignore.case = TRUE) ~ "MID",
+    grepl("conv.*", HU_Primary, ignore.case = TRUE) ~ "CON",
+    grepl("lateral", HU_Primary, ignore.case = TRUE) ~ "LAT",
+    grepl("plunge", HU_Primary, ignore.case = TRUE) ~ "PL",
+    grepl("deb.*", HU_Primary, ignore.case = TRUE) ~ "DEB",
+    grepl("beav.*", HU_Primary, ignore.case = TRUE) ~ "BEA",
+    grepl(".*slide", HU_Primary, ignore.case = TRUE) ~ "LAN",
+    grepl("back.*", HU_Primary, ignore.case = TRUE) ~ "BAC",
+    grepl("aband.*", HU_Primary, ignore.case = TRUE) ~ "AB",
+    grepl("pool", HU_Primary, ignore.case = TRUE) ~ "SLOW",
+    TRUE ~ HU_Primary  # Keep original if no match
+  )
+)
+```
+
+# Habitat Unit Visualisation
+
+It can be useful to take a look at the distribution of habitat units in your reach, and how these correspond to the thalweg depth and residual surface estimate. We generate some plots that align these data, and export them as html to your output folder.
+
+```{r plot habitat units long, fig.width=10, fig.height=10, echo=FALSE}
+## there are a few formatting issues here, which we hope to fix (repetitive legend, overlapping title text, absent lables)
+# Generate color map for habitat units
+unique_habitat_units <- unique(residuals.df$HU_Primary)
+habitat_colors <- c(
+  "#E69F00", "#56B4E9", "#009E73", "#6A0572", "#264653", "#D55E00", "#CC79A7", "#999999",
+  "#F4A261", "#0072B2", "#2A9D8F", "#E76F51", "#8AB17D", "#DDA15E", "#B5838D", "#F0E442",
+  "#003F5C", "#BC5090"
+)
+habitat_color_map <- setNames(habitat_colors, unique_habitat_units)
+
+# Calculate bar positions and widths for HU data
+residuals.df <- residuals.df %>%
+  arrange(Site, year, distance) %>%
+  group_by(Site, year) %>%
+  mutate(
+    bar_start = distance - (distance - lag(distance, default = first(distance))) / 2,
+    bar_end = distance + (lead(distance, default = last(distance)) - distance) / 2,
+    bar_width = bar_end - bar_start
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(bar_start) & !is.na(bar_end))
+
+# Create list for individual plots
+plots <- list()
+
+# Loop through each unique Site and Year combination
+for (site_year in unique(paste(residuals.df$Site, residuals.df$year))) {
+  site_year_data <- residuals.df %>% 
+    filter(paste(Site, year) == site_year) %>%
+    filter(distance >= 0)  # Filter out negative distance values (artificial nickpoints)
+  
+  plot <- plot_ly()
+  
+  # Add Habitat Unit bars at very top
+  for (hu in unique(site_year_data$HU_Primary)) {
+    hu_data <- site_year_data %>% filter(HU_Primary == hu)
+    
+    plot <- plot %>%
+      add_segments(
+        data = hu_data,
+        x = ~bar_start,
+        xend = ~bar_end,
+        y = 0.01,
+        yend = 0.01,
+        line = list(color = habitat_color_map[hu], width = 20),
+        name = hu
+      )
+  }
+  
+  # Then add Thalweg Depth, res surface
+  plot <- plot %>%
+    add_trace(
+      data = site_year_data,
+      x = ~distance,
+      y = ~-Thalweg_Depth_m,
+      type = "scatter",
+      mode = "lines",
+      line = list(width = 2, color = "black"),
+      name = "Thalweg Depth"
+    ) %>%
+    add_trace(
+      data = site_year_data,
+      x = ~distance,
+      y = ~-residual_surface,
+      type = "scatter",
+      mode = "markers",
+      marker = list(size = 5, color = "blue"),
+      name = "Residual Surface"
+    )
+  
+  # Set the layout with titles
+  plot <- plot %>%
+    layout(
+      xaxis = list(title = "Distance (m)"),
+      yaxis = list(
+        title = "Depth (m)",
+        zeroline = FALSE,
+        showgrid = FALSE,
+        range = c(-max(residuals.df$Thalweg_Depth_m, na.rm = TRUE), 0.05)
+      ),
+      showlegend = FALSE,  # Hide legend for individual plots
+      annotations = list(
+        list(
+          x = 0.5,
+          y = 1.1,
+          text = paste(site_year),
+          showarrow = FALSE,
+          font = list(size = 14, family = "Arial", color = "black"),
+          xref = "paper",
+          yref = "paper"
+        )
+      )
+    )
+  
+  plots[[site_year]] <- plot
+}
+
+# Dummy plot for a consolidated legend (attempts to avoid repetition unfruitful so far)
+legend_plot <- plot_ly() %>%
+  add_segments(
+    x = c(1),  # Dummy values
+    xend = c(1),
+    y = c(1),
+    yend = c(1),
+    color = ~factor(unique_habitat_units, levels = unique_habitat_units),
+    colors = habitat_colors,
+    showlegend = TRUE
+) %>%
+  layout(
+    legend = list(
+      orientation = "h",
+      title = list(text = "<b>Habitat Units</b>"),
+      y = -0.3
+  )
+)
+
+# Extract unique Sites and Years
+unique_sites <- unique(residuals.df$Site)
+unique_years <- unique(residuals.df$year)
+
+# Determine the y-axis range based on the greatest range in data
+y_min <- -max(residuals.df$Thalweg_Depth_m, na.rm = TRUE)
+y_max <- 0.05
+
+# Create list of plot groups by site
+site_plots <- list()
+
+for (site in unique_sites) {
+  site_specific_plots <- plots[grepl(site, names(plots))]
+
+  # Arrange years as columns for each site row (site as row seems preferable for y axis comparisons)
+  site_plots[[site]] <- subplot(
+    site_specific_plots,
+    nrows = 1,  # One row for years, multiple columns
+    shareY = TRUE,
+    titleY = TRUE
+  ) %>%
+    layout(
+      yaxis = list(
+        range = c(y_min, y_max),  # Fixed y-axis range
+        title = "Depth (m)",
+        zeroline = FALSE
+      )
+    )
+}
+
+# Arrange each site in its own row with consistent y-axis scaling
+final_plot <- subplot(
+  site_plots,
+  nrows = length(site_plots),  # One row per site
+  shareX = TRUE,
+  titleX = TRUE
+) %>%
+  layout(
+    annotations = NULL,  # Remove the overall figure title
+    showlegend = FALSE,
+    legend = list(
+      title = NULL,  # Remove legend title
+      orientation = "v",
+      x = 1.05
+    )
+  )
+
+# Display the final plot with adjustments
+final_plot
+
+# Export individual site-year plots
+for (site_year in names(plots)) {
+  filename <- paste0("Habitat Unit and Depth ", site_year, ".html")  # 
+  export_plot(plots[[site_year]], filename)
+}
+
+# Export the composite figure
+export_plot(final_plot, "Habitat Units and Depth All Site Years.html")
+```
+
+Certain features of the above figure may be of particular interest. For example, if your reach contained DEB (debris dammed pools) or BEA (beaver dammed pools), you can see how these features correspond to the residual pools (pools where flow approaches zero) in your reach. We can ask what proportion of reach residual pool habitat, based on habitat unit assignments, is comprised of beaver or debris dammed pools. This may be of particular interest where process-based restoration work has been initiated. 
+
+For this question, we consider any residual pool that is 50% or more assigned as BEA or DEB as being a beaver or debris pool in its entirety. Similarly, if the field assignment of BEA or DEB corresponds with a residual pool outlet (i.e., debris or a beaver dam was observed holding back water) then the entire residual pool will be assigned as a beaver/debris dam pool, even if the full extent was not recognised as such in the field. This approach is to account for differences between code-assigned residual pools and pools as recognised in the field, such as where a sequence of beaver pool, debris pool, scour pool is observed, but in fact the whole section appears to be controlled/backwatered by the downstream beaver dam, based on the residual surface.
+
+Below we display and export summary data for each year at each reach, and the individual pool data with their status as beaver/debris dam. With our Hatchery Channel example data there is one debris dam residual pool identified in 2024 but none in 2025. With reference to the above figure, this is explained by the woody debris being at the location of a pool outlet in 2024, but the same magnitude of debris is located mid-pool in 2025 and is therefore considered not to be functionally creating the pool.
+
+```{r proportion BEA/DEB pools, echo = FALSE, results='asis'}
+calculate_beaver_and_debris_pools_by_site_year <- function(df) {
+  # Remove rows with NA pool_ids and negative distances
+  df <- df[df$distance >= 0 & !is.na(df$pool_id), ]
+  
+  # Ensure the dataframe is sorted by Site, year, and distance
+  df <- df[order(df$Site, df$year, df$distance), ]
+  
+  # Split the data by Site-year
+  site_year_groups <- split(df, list(df$Site, df$year), drop = TRUE)
+  
+  # Initialize storage for site-year summaries
+  site_year_summary <- list()
+  
+  for (site_year in names(site_year_groups)) {
+    # Extract the data for the current site-year
+    site_year_data <- site_year_groups[[site_year]]
+    
+    # Identify outlet debris conditions
+    site_year_data$outlet_debris <- with(site_year_data, ifelse(
+      (HU_Primary %in% c("BEA", "DEB")) &
+        ((pool_id != lag(pool_id, default = first(pool_id))) |
+         (pool_id != lag(pool_id, n = 2, default = first(pool_id)))),
+      "Y",
+      "N"
+    ))
+    
+    # Initialize storage for pool classification
+    pool_summary <- list()
+    
+    # Process each unique pool_id
+    unique_pool_ids <- unique(site_year_data$pool_id)
+    for (pool_id in unique_pool_ids) {
+      # Subset data for the current pool
+      pool_data <- site_year_data[site_year_data$pool_id == pool_id, ]
+      
+      # Calculate the length of the pool
+      pool_length <- max(pool_data$distance) - min(pool_data$distance)
+      
+      # Calculate the proportion of the pool's length for each habitat unit
+      habitat_lengths <- pool_data %>%
+        group_by(HU_Primary) %>%
+        summarise(length = sum(lead(distance, default = max(distance)) - distance, na.rm = TRUE), .groups = "drop")
+      
+      # Get lengths for BEA and DEB, defaulting to 0 if not present
+      bea_length <- habitat_lengths$length[habitat_lengths$HU_Primary == "BEA"]
+      deb_length <- habitat_lengths$length[habitat_lengths$HU_Primary == "DEB"]
+      bea_length <- ifelse(length(bea_length) == 0, 0, bea_length)
+      deb_length <- ifelse(length(deb_length) == 0, 0, deb_length)
+      
+      # Check if 50% or more of the pool's length is BEA or DEB
+      is_beaver_pool <- bea_length >= 0.5 * pool_length
+      is_debris_pool <- deb_length >= 0.5 * pool_length
+      
+      # Check if outlet debris condition is met
+      has_beaver_outlet <- any(pool_data$outlet_debris == "Y" & pool_data$HU_Primary == "BEA")
+      has_debris_outlet <- any(pool_data$outlet_debris == "Y" & pool_data$HU_Primary == "DEB")
+      
+      # Assign pool type based on habitat dominance or outlet debris condition
+      pool_type <- if (is_beaver_pool || has_beaver_outlet) {
+        "Beaver Pool"
+      } else if (is_debris_pool || has_debris_outlet) {
+        "Debris-Dam Pool"
+      } else {
+        "Other"
+      }
+      
+      # Calculate sagittal area for the pool
+      sagittal_area <- 0
+      for (i in 1:(nrow(pool_data) - 1)) {
+        depth <- pool_data$residual_depth[i]
+        if (is.na(depth) || depth <= 0) next
+        spacing <- abs(pool_data$distance[i + 1] - pool_data$distance[i])
+        sagittal_area <- sagittal_area + (depth * spacing)
+      }
+      
+      # Handle last row contribution to sagittal area
+      last_row <- pool_data[nrow(pool_data), ]
+      if (!is.na(last_row$residual_depth) && last_row$residual_depth > 0) {
+        next_pool_start <- site_year_data[site_year_data$distance > last_row$distance & !is.na(site_year_data$pool_id), ]
+        if (nrow(next_pool_start) > 0) {
+          next_distance <- next_pool_start$distance[1]
+          spacing <- abs(next_distance - last_row$distance)
+          sagittal_area <- sagittal_area + (last_row$residual_depth * spacing)
+        }
+      }
+      
+      # Store results for the pool
+      pool_summary[[as.character(pool_id)]] <- list(
+        pool_length = pool_length,
+        sagittal_area = sagittal_area,
+        pool_type = pool_type
+      )
+    }
+    
+    # Create a data frame from the pool summary
+    pool_summary_df <- data.frame(
+      pool_id = names(pool_summary),
+      pool_length = sapply(pool_summary, function(x) x$pool_length),
+      sagittal_area = sapply(pool_summary, function(x) x$sagittal_area),
+      pool_type = sapply(pool_summary, function(x) x$pool_type)
+    )
+    
+    # Calculate proportions for the current site-year
+    total_length <- sum(pool_summary_df$pool_length)
+    total_sagittal_area <- sum(pool_summary_df$sagittal_area)
+    
+    beaver_length <- sum(pool_summary_df$pool_length[pool_summary_df$pool_type == "Beaver Pool"], na.rm = TRUE)
+    debris_length <- sum(pool_summary_df$pool_length[pool_summary_df$pool_type == "Debris-Dam Pool"], na.rm = TRUE)
+    
+    beaver_area <- sum(pool_summary_df$sagittal_area[pool_summary_df$pool_type == "Beaver Pool"], na.rm = TRUE)
+    debris_area <- sum(pool_summary_df$sagittal_area[pool_summary_df$pool_type == "Debris-Dam Pool"], na.rm = TRUE)
+    
+    proportions <- list(
+      total_length = total_length,
+      total_sagittal_area = total_sagittal_area,
+      beaver_length_prop = ifelse(total_length > 0, beaver_length / total_length, 0),
+      debris_length_prop = ifelse(total_length > 0, debris_length / total_length, 0),
+      beaver_sagittal_area_prop = ifelse(total_sagittal_area > 0, beaver_area / total_sagittal_area, 0),
+      debris_sagittal_area_prop = ifelse(total_sagittal_area > 0, debris_area / total_sagittal_area, 0)
+    )
+    
+    # Store the results for the current site-year
+    site_year_summary[[site_year]] <- list(
+      summary_table = pool_summary_df,
+      proportions = proportions
+    )
+  }
+
+  return(site_year_summary)
+}
+
+# Apply the function
+result <- calculate_beaver_and_debris_pools_by_site_year(residuals.df)
+
+# Convert list of proportions into a data frame
+proportions_df <- do.call(rbind, lapply(names(result), function(site_year) {
+  data.frame(site_year = site_year, 
+             total_length = result[[site_year]]$proportions$total_length,
+             total_sagittal_area = result[[site_year]]$proportions$total_sagittal_area,
+             beaver_length_prop = result[[site_year]]$proportions$beaver_length_prop,
+             debris_length_prop = result[[site_year]]$proportions$debris_length_prop,
+             beaver_sagittal_area_prop = result[[site_year]]$proportions$beaver_sagittal_area_prop,
+             debris_sagittal_area_prop = result[[site_year]]$proportions$debris_sagittal_area_prop)
+}))
+
+# display summary table in R (all sites all years)
+kable(proportions_df, caption = paste("Beaver or Debris Pools Summary All Sites Years"),
+             format = "html", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+
+# Export the summary table all Site Years
+export_table(proportions_df, "Beaver Debris Pool Reach Proportions.csv")
+
+# Export individual site-year tables 
+for (site_year in names(result)) {
+  site_year_table <- result[[site_year]]$summary_table
+  
+  # Ensure we are exporting only the raw data
+  if (!is.data.frame(site_year_table)) {
+    site_year_table <- as.data.frame(site_year_table)
+  }
+  
+  # Extract Site and Year from site_year
+  site_info <- unlist(strsplit(site_year, "[.]"))  
+  site_name <- site_info[1]
+  year <- site_info[2]
+  
+  # Define filename dynamically
+  filename <- paste0("Beaver or Debris Pools ", site_year, ".csv")
+  
+  # Write to CSV using the function
+  export_table(site_year_table, filename)
+  
+# print tables in R 
+ print(kable(site_year_table, caption = paste("Beaver or Debris Pools ", site_name, " ", year),
+             format = "html", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE))
+}
+```
+
+A summary figure is also generated and exported to your output folder. The composite figure displays the reachwide proportion of residual pool length/sagittal area that is comprised of beaver and debris dammed pools, for each reach across time.
+
+```{r BEA/DEB summary plots, echo = FALSE}
+# Prepare data for plotting
+plot_data <- do.call(rbind, lapply(names(result), function(site_year) {
+  site_year_split <- strsplit(site_year, "\\.")[[1]]
+  Site <- site_year_split[1]
+  year <- site_year_split[2]
+  
+  proportions <- result[[site_year]]$proportions
+  data.frame(
+    Site = Site,
+    year = factor(year),  # Convert year to factor for x-axis
+    beaver_length_prop = proportions$beaver_length_prop,
+    debris_length_prop = proportions$debris_length_prop,
+    beaver_sagittal_area_prop = proportions$beaver_sagittal_area_prop,
+    debris_sagittal_area_prop = proportions$debris_sagittal_area_prop
+  )
+}))
+
+# Convert data to long format for faceting
+plot_data_long <- plot_data %>%
+  pivot_longer(cols = c(beaver_length_prop, debris_length_prop, 
+                        beaver_sagittal_area_prop, debris_sagittal_area_prop), 
+               names_to = "Metric", values_to = "Proportion") %>%
+  mutate(
+    Pool_Type = case_when(
+      Metric == "beaver_length_prop" ~ "Beaver Pool",
+      Metric == "debris_length_prop" ~ "Debris Pool",
+      Metric == "beaver_sagittal_area_prop" ~ "Beaver Pool",
+      Metric == "debris_sagittal_area_prop" ~ "Debris Pool"
+    ),
+    Proportion_Type = case_when(
+      str_detect(Metric, "length") ~ "Proportion of Reach Residual Pool Total Length",
+      str_detect(Metric, "sagittal_area") ~ "Proportion of Reach Residual Pool Total Sagittal Area"
+    )
+  )
+
+# hollow shape codes
+shape_values <- c("Beaver Pool" = 21, "Debris Pool" = 24) 
+
+# Create the composite faceted plot
+dam_plot<-ggplot(plot_data_long, aes(x = year, y = Proportion, 
+                           color = Pool_Type, linetype = Pool_Type, shape = Pool_Type, 
+                           group = interaction(Site, Pool_Type))) +
+  geom_point(size = 4, stroke =1.3) +  
+  geom_line(linewidth = 1.1) +  
+  scale_shape_manual(values = shape_values) +  # Apply  hollow shapes
+  facet_grid(rows = vars(Site), cols = vars(Proportion_Type)) +
+  ylim(0, 1) +  # Set y-axis range to 0-1 for all plots
+  labs(
+    x = "Year", 
+    y = "Proportion",
+    title = "Residual Pool Proportions Formed by Beaver or Debris Dams",
+    color = "Pool Type",
+    shape = "Pool Type",
+    linetype = "Pool Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        strip.text = element_text(size = 10),
+        panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5), 
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+dam_plot
+#export figure pdf
+export_plot(dam_plot, "Beaver Debris Dam Pools.pdf")
+```
+
+# Habitat Unit Diversity
+
+Now let's take a look at diversity metrics for the habitat units assigned in the field. When we refer to pools here, we are referring only to habitat assigned in the field, and not the residual pools that we identified in our previous script. Remember that while residual pools are an estimate of habitat when flow approaches zero, the pools assigned in the field represent habitat as observable at that particular flow condition.
+
+Before reading into the below metrics, it is worth considering that people classifying Habitat Units may vary in experience and/or confidence, and could (for example) 'default' to a particular type of pool that they are most familiar when they are unsure. This could mean that identical habitats can differ in certain metrics based on the observer. We feel that pool percent and pool-to-riffle ratio are robust to these concerns, that scoured and dammed pool percentages are fairly robust in the majority of cases, but that the Shannon diversity index is prone to underestimates of diversity if observers are not confident assigning any of the appropriate habitat unit categories. As such, exercise extra caution with interpreting changes in Shannon indices where observers have changed over time or between reaches (or even if significant time has passed for the same observer).
+
+```{r habitat unit diversity, echo = FALSE}
+calculate_diversity_and_area_metrics_by_site_year <- function(df) {
+  # Remove rows with NA or negative distances
+  df <- df[df$distance >= 0 & !is.na(df$pool_id), ]
+  
+  # Create a unique identifier for site-year combinations, split by site-year
+  df$site_year <- paste(df$Site, df$year, sep = ".")
+  split_data <- split(df, df$site_year)
+  
+  # Function to calculate metrics for each subset
+  calculate_metrics <- function(sub_df) {
+    # Shannon Diversity Index for HU_Primary
+    hu_counts <- table(sub_df$HU_Primary)
+    hu_proportions <- hu_counts / sum(hu_counts)
+    shannon_index <- -sum(hu_proportions * log(hu_proportions), na.rm = TRUE)
+    
+    # Pool Percent (based on bar_width)
+    pool_hu <- c("ED", "TR", "MID", "CON", "LAT", "PL", "DEB", "BEA", "LAN", "BAC", "AB", "SLOW")
+    pool_area_df <- sub_df[sub_df$HU_Primary %in% pool_hu, ]
+    total_pool_area <- sum(pool_area_df$bar_width)  # Sum of bar_width for pool types
+    
+    # Scoured Pool Percent (based on bar_width)
+    scoured_hu <- c("ED", "TR", "MID", "CON", "LAT", "PL")
+    scoured_area_df <- sub_df[sub_df$HU_Primary %in% scoured_hu, ]
+    total_scoured_area <- sum(scoured_area_df$bar_width)
+    
+    # Dammed Pool Percent (based on bar_width)
+    dammed_hu <- c("DEB", "BEA", "LAN", "BAC", "AB", "SLOW")
+    dammed_area_df <- sub_df[sub_df$HU_Primary %in% dammed_hu, ]
+    total_dammed_area <- sum(dammed_area_df$bar_width)
+    
+    # Total area (distance range in the dataframe)
+    total_area <- max(sub_df$distance) - min(sub_df$distance)
+    
+    # Pool to Riffle Ratio
+    riffle_hu <- "RIF"
+    pool_hu_for_ratio <- pool_hu
+    pool_area_for_ratio_df <- sub_df[sub_df$HU_Primary %in% pool_hu_for_ratio, ]
+    riffle_area_df <- sub_df[sub_df$HU_Primary == riffle_hu, ]
+    
+    total_pool_area_for_ratio <- sum(pool_area_for_ratio_df$bar_width)
+    total_riffle_area <- sum(riffle_area_df$bar_width)
+    
+    pool_to_riffle_ratio <- ifelse(total_riffle_area > 0, total_pool_area_for_ratio / total_riffle_area, 0)
+    
+    # Calculate percentages based on bar_width
+    pool_percent <- ifelse(total_area > 0, total_pool_area / total_area * 100, 0)
+    scourpool_percent <- ifelse(total_area > 0, total_scoured_area / total_area * 100, 0)
+    dammedpool_percent <- ifelse(total_area > 0, total_dammed_area / total_area * 100, 0)
+    
+    # Return metrics as a named vector
+    c(
+      shannon_diversity_index = shannon_index,
+      pool_percent = pool_percent,
+      scourpool_percent = scourpool_percent,
+      dammedpool_percent = dammedpool_percent,
+      pool_to_riffle_ratio = pool_to_riffle_ratio
+    )
+  }
+  
+  # Apply the metric calculation function to each site-year
+  results <- lapply(split_data, calculate_metrics)
+  
+  # Combine results into a data frame with metrics as columns
+  results_df <- do.call(rbind, lapply(names(results), function(site_year) {
+    metrics <- results[[site_year]]
+    site_year_split <- strsplit(site_year, "\\.")[[1]]
+    data.frame(
+      Site = site_year_split[1],
+      year = site_year_split[2],
+      shannon_diversity_index = metrics["shannon_diversity_index"],
+      pool_percent = metrics["pool_percent"],
+      scourpool_percent = metrics["scourpool_percent"],
+      dammedpool_percent = metrics["dammedpool_percent"],
+      pool_to_riffle_ratio = metrics["pool_to_riffle_ratio"]
+    )
+  }))
+  
+  # Ensure numeric columns are correctly formatted
+  results_df <- results_df %>%
+    mutate(across(c(shannon_diversity_index:pool_to_riffle_ratio), as.numeric))
+  
+  # Remove row names
+  rownames(results_df) <- NULL
+  
+  return(results_df)
+}
+
+# Example of running the function on your dataframe
+result <- calculate_diversity_and_area_metrics_by_site_year(residuals.df)
+
+# display summary table in R 
+kable(result, caption = paste("Habitat Unit Diversity Metrics"),
+             format = "html", digits = 3) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+
+# Export the summary table
+export_table(result, "Habitat Unit Diversity Metrics.csv")
+```
+
+```{r HU metric plots, echo = FALSE}
+# Convert results dataframe to long format
+plot_data_long <- result %>%
+  pivot_longer(cols = c(shannon_diversity_index, pool_to_riffle_ratio), 
+               names_to = "Metric", values_to = "Value") %>%
+  mutate(
+    Metric_Label = case_when(
+      Metric == "shannon_diversity_index" ~ "Shannon Diversity Index",
+      Metric == "pool_to_riffle_ratio" ~ "Pool to Riffle Ratio"
+    )
+  )
+
+# Combined faceted plot with axis lines
+HUplots<-ggplot(plot_data_long, aes(x = factor(year), y = Value, color = Site, group = Site)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_grid(rows = vars(Metric_Label), cols = vars(Site), scales = "free_y") +
+  labs(
+    title = "Shannon Diversity Indices and Pool to Riffle Ratios by Site and Year",
+    x = "Year",
+    y = "Value",
+    color = "Site"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5), 
+    panel.grid = element_blank()  # **Removes grid lines**
+  )
+
+############# plot of pool type proportions 
+# Prepare data for the stacked bar plot
+plot_data_long_percent <- result %>%
+  select(Site, year, pool_percent, scourpool_percent, dammedpool_percent) %>%
+  pivot_longer(cols = c(pool_percent, scourpool_percent, dammedpool_percent),
+               names_to = "Pool_Type", values_to = "Proportion") %>%
+  mutate(Pool_Type_Label = case_when(
+    Pool_Type == "pool_percent" ~ "Pool Percent",
+    Pool_Type == "scourpool_percent" ~ "Scourpool Percent",
+    Pool_Type == "dammedpool_percent" ~ "Dammedpool Percent"
+  ))
+
+# Convert percentages to proportions (0 to 1)
+plot_data_long_percent <- plot_data_long_percent %>%
+  mutate(Proportion = Proportion / 100)
+
+# Define the base full reach (always 1) separately
+full_reach <- plot_data_long_percent %>%
+  filter(Pool_Type == "pool_percent") %>%
+  mutate(Proportion = 1)  # Set to full reach
+
+# Filter only the stacked proportions
+stacked_pools <- plot_data_long_percent %>%
+  filter(Pool_Type %in% c("scourpool_percent", "dammedpool_percent"))
+
+# Create the plot
+stackedplot<-ggplot() +
+  # Empty full bar outline (always height 1)
+  geom_bar(data = full_reach, aes(x = factor(year), y = Proportion),
+           stat = "identity", fill = NA, color = "black", width = 0.7) +
+  
+  # Stacked bars for scourpool & dammedpool
+  geom_bar(data = stacked_pools, aes(x = factor(year), y = Proportion, fill = Pool_Type_Label),
+           stat = "identity", width = 0.7) +
+  
+  # Add pool_percent as a text label, positioned correctly
+  geom_text(data = plot_data_long_percent %>% filter(Pool_Type == "pool_percent"),
+            aes(x = factor(year), y = Proportion, label = sprintf("%.3f", Proportion)), 
+            size = 4, fontface = "bold", vjust = -0.5) +  # Adjust position slightly above
+  
+  # Facet by Site
+  facet_wrap(~ Site) +
+  
+  # Set fill colors and legend text
+  scale_fill_manual(
+    values = c("Scourpool Percent" = "#F4A261", "Dammedpool Percent" = "#0072B2"),
+    labels = c("Dammedpool Percent" = "Dammed Pool", 
+               "Scourpool Percent" = "Scoured Pool"),
+    name = "Proportional composition:"
+  ) +
+  
+  # Custom legend for bolded text
+  guides(fill = guide_legend(override.aes = list(size = 5)),
+         shape = guide_legend(title = "Bolded number = total pool proportion", override.aes = list(color = NA))) +
+
+  # Labels and theme
+  labs(
+    title = "Reach Thalweg Proportion as Pool Type",
+    x = "Year",
+    y = "Proportion"
+  ) +
+  ylim(0, 1) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 12, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+HUplots
+stackedplot
+#export figure pdf
+export_plot(stackedplot, "Reach Thalweg Proportion as Pool.pdf")
+#export figure pdf
+export_plot(HUplots, "Shannon Index and Pool-Riffle Ratio.pdf")
+```
+
+
+
