@@ -25,7 +25,7 @@ The data collection guidance focuses on collecting quantitative data in a repeat
 
 We hope that these monitoring packages reduce the time and cost of monitoring restoration projects, and generate useful insights for your adaptive management.
 
-/><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><> 
+\><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><> 
 
 Monitoring package folders will generally contain the following files. If there is a folder without data analysis files, this means we intend to add them after summer (so please go collect the data, and check back after!).
 Typical contents:
@@ -42,7 +42,7 @@ Typical contents:
 
 - rmd files: corresponding to each html file, these contain the R code and guidance. To be used alongside the html to analyse the data you collected.
 
-/><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><> 
+\><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><> 
 
 We are in the process of producing more Monitoring Packages that you can choose from, in a modular fashion, to best track and evaluate the success of your restoration objectives. If you find this package useful, please share it with others. Please get in touch with the authors (oliver.franklin@dfo-mpo.gc.ca and nicci.zargarpour@dfo-mpo.gc.ca) or your local DFO restoration staff if you have requests for additional packages.
 
