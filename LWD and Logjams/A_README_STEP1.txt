@@ -12,19 +12,19 @@ We hope that these monitoring packages reduce the time and cost of monitoring re
 
 **This Monitoring Package**
 
-This folder contains the Pebble Count Monitoring Package. The files, in the order that you will need them, are as follows:
+This folder contains the Large Woody Debris (LWD) and Logjam Package. The files, in the order that you will need them, are as follows:
 
 - txt: this readme :)
 
-- pdf: field methods including one-page field reference sheet and field datasheet. Contains a brief intro to our approach and useful references
+- pdf: field methods including one-page field reference sheet and field datasheet. Contains step-by-step field guidance, background for our chosen approach and useful references
 
-- xlsx: field datasheet in spreadsheet format (you may not need to use this, probably easier to print from the pdf above)
+- xlsx: 2 field datasheets in spreadsheet format for LWD and Logjam surveys (you may not need to use these files, it is probably easier to print them from the pdf above)
 
-- csv: data entry sheet to prepare data from the field for analysis
+- csv: 2 data entry sheets to prepare data from the field for analysis: 1 for LWD, 1 for logjam data entry.
 
-- 1 html file: step by step guidance for data analysis. Contains some (partially fabricated) example data
+- 2 html files: step by step guidance for data analysis. Use the LWD file first, and then the logjam file after (if you recorded any logjams). Contains some (partially fabricated) example data
 
-- 1 rmd file: corresponding to the above html file, these contain the R code and guidance. To be used alongside the html to analyse the data you collected.
+- 2 rmd file2: corresponding to the above html files, these contain the R code and guidance. To be used alongside the htmls to analyse the data you collected. Use the LWD file first, and then the logjam file after (if you recorded any logjams)
 
 
 

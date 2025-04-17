@@ -1,0 +1,1381 @@
+---
+title: "Large Woody Debris (LWD) Analysis"
+author: "Nicci Zargarpour & Oliver Franklin"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    code_download: true 
+
+
+---
+
+```{r setup, include=FALSE} 
+# Load required libraries and install any missing ones. This code loads the package to the work area and, if it is not installed, installs it.
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set all figures in the document to be the same width (max page width)
+knitr::opts_chunk$set(fig.width = 10, fig.height = 6, out.width = "100%")
+
+
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(rmarkdown,htmltools, leaflet, tidyverse,cowplot,knitr,readxl,kableExtra,sf,tmap,reactable,rmarkdown,viridis,gridExtra, DT, htmlwidgets, scales,lemon,car, moments, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+
+# Apply a global theme to all plots (so that figure text is large enough)
+theme_set(theme_classic(base_size = 14))  # Adjust base font size globally
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Figure Title.pdf")
+# export_plot(plotly_plot, "Figure Title.html")
+# 
+# # Exporting a table
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(mtcars)
+# export_summary(summary_text, "summary")
+```
+
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types for LWD data
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Reach_Start_Latitude  = "numeric",
+    Reach_Start_Longitude = "numeric",
+    Reach_End_Latitude    = "numeric",
+    Reach_End_Longitude   = "numeric",
+    Reach_Length          = "numeric",
+    Staff                 = "character",
+    Observer              = "character",
+    Piece_ID              = "character",
+    Type                  = "character",
+    Length_m              = "numeric",
+    Diameter_m            = "numeric",
+    Method                = "character",
+    Orientation           = "character",
+    Stability             = "character",
+    Rootwad               = "character",
+    Notes                 = "character"
+    
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+    return(df)
+}
+```
+*This document contains data wrangling (tidying) and LWD analyses. We also have a separate script within this monitoring package which should be used if you encountered and recorded any logjams (see Logjam_DataAnalysis.rmd and Logjam_DataAnalysis.html). If you intend to run the logjam analyses, you must run this script first, as the logjam script uses metrics (and tidied data) from this one. We strongly recommend recording both LWD and logjams simultaneously to get a more complete understanding of wood in your reach.*_*
+
+Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
+
+You should be approaching data analysis with a set of established hypotheses, predictions, and plans for the various outcomes. If you are not familiar with the importance of *a priori* hypotheses and the dangers of data dredging, please spend some time reading up on these. Only once you have your hypotheses and predictions in mind (and ideally on paper) should you continue. We recommend revisiting your predictions and interpretations of possible outcomes before you run every single statistical test.
+
+# Guidance Format
+
+We have written these data analysis scripts in R markdown (.rmd files) and printed them as .html documents. As **Step 1** we recommend that you read through the .html files, which we printed using some example data. The .html files contain all the written guidance, but omit most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+ 
+
+# Data Wrangling
+
+Data wrangling, or cleaning and structuring the data, is the first step before analysis. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+The first step is to combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Note, LWD measurements should be in metres. 
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/LWD/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+It may be necessary to subset within this dataframe if, e.g., you included more than one focal reach in your .csv files (surveys of additional channels, tributaries etc.). These scripts are intended to analyse one focal reach, to compare it over time and with independent reference sites that also feature one reach. Note that your study may have included just the main channel, or perhaps also side-channels that were present. Ensure you are consistent from year-to-year and between sites, and preferably also among different monitoring protocols.  The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways.
+
+``` {r subset option}
+# df <- subset(df, Site %in% c("Site 1", "Site 2")) 
+
+# if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channel within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
+```
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+
+Take a look through the dataframe above and ensure there are no errors and/or explore unusual entries. In some places, you may have missing entries or 'NA', when an actual value is more appropriate. For example, if you did not record any LWD 'Piece ID' this is presumably because there was '0' presence, and this absence of LWD is informative. Our code will automatically make the following replacements, but if there are other unusual or missing entries you should manually edit the raw data csv before re-running this script from the top. Our code replaces:
+
+
+
+| Variable 	| If present:         	| Replaced by:                  	|
+|----------	|---------------------	|-------------------------------	|
+| Piece_ID 	| 'NA', '   ', or '-' 	| 0 (i.e., no LWD present)      	|
+| Method   	| 'NA', or '    '     	| E (assume it is an estimate)  	|
+| Rootwad  	| 'NA', '   ', or '-'  	| N (assume no rootwad present) 	|
+
+
+```{r missing_values_and_alternate_coding, echo = FALSE}
+#this code attempts to correct/align the values for analyses. There is lots of potential for character strings we did not predict
+
+df <- df %>%
+  mutate(
+    # Piece_ID: convert NA, blank, or "-" to "0", preserve existing numeric values
+    Piece_ID = case_when(
+      is.na(Piece_ID) ~ "0",
+      str_trim(str_to_lower(Piece_ID)) %in% c("", "-") ~ "0",
+      TRUE ~ as.character(Piece_ID)
+    ),
+
+    # Type: standardize to "Wet" or "Dry" if W or D is found
+    Type = case_when(
+      str_detect(str_to_lower(Type), "w") ~ "Wet",
+      str_detect(str_to_lower(Type), "d") ~ "Dry",
+      TRUE ~ Type
+    ),
+
+    # Method: default to "E" for missing/blank/"-", then assign "Measured" or "Estimate" if 'm' or 't' found
+    Method = case_when(
+      is.na(Method) | str_trim(Method) %in% c("", "-") ~ "E",
+      str_detect(str_to_lower(Method), "m") ~ "M",
+      str_detect(str_to_lower(Method), "t") ~ "E",
+      TRUE ~ Method
+    ),
+
+    # Stability: clean up values based on specific patterns
+    Stability = case_when(
+      str_detect(str_to_lower(str_trim(Stability)), "^r") ~ "Ramp",
+      str_detect(str_to_lower(Stability), "pin") ~ "Pinned",
+      str_detect(str_to_lower(Stability), "cab") ~ "Cabled",
+      str_detect(str_to_lower(Stability), "^b") ~ "Buried",
+      str_detect(str_to_lower(Stability), "^(un)") ~ "Unattached",
+      TRUE ~ Stability
+    ),
+
+    # Rootwad: default to "N" for NA, blank, or "-", then parse based on presence of 'p' or 'a'
+    Rootwad = case_when(
+      is.na(Rootwad) | str_trim(Rootwad) %in% c("", "-") ~ "N",
+      str_detect(str_to_lower(Rootwad), "p") ~ "Y",
+      str_detect(str_to_lower(Rootwad), "a") ~ "N",
+      TRUE ~ Rootwad
+    )
+  )
+
+```
+
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we also isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to 'ymd', 'myd', 'dym', etc.):
+
+
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$year <- as.factor(year(df$parsed_date))       # Extract the year
+```
+
+## Export Data
+
+
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/LWD"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from these scripts. Some of the outputs (dataframes) may be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+
+We will now export the tidied dataframe so that it can be used in future analyses as needed. Check your file folder and the .csv files to see the data you exported before moving on.
+
+```{r df export, echo = FALSE}
+export_table(as.data.frame(df),"LWD_dataframe.csv")
+lwd_data<-df
+```
+
+# Large Woody Debris Analysis
+
+The objective of the Large Woody Debris (LWD) field survey procedure is to provide a repeatable methodology that can be used to monitor the abundance, characteristics and function of LWD in wadeable streams, with a paricular focus on identifying the effects of restoration actions. 
+
+Let's briefly recall the survey methodology:
+
+Along each reach, individual pieces of LWD within the bankfull channel were identified and measured or estimated. Teams recorded total length and diameter of each piece, classified each piece as wet (i.e., in contact with the wetted channel during base-flow conditions) or dry (i.e., not in contact with the wetted channel during base-flow conditions), recorded rootwad presence/absence, and identified the orientation and stability of the piece.  
+  
+This script examines the characteristics of Large Woody Debris (LWD) across surveyed reaches. We will explore the following:
+
+- Physical characteristics of LWD 
+
+- Frequency of LWD 
+
+- Distribution of LWD within the channel
+
+- LWD orientation and stability
+
+
+__Note:__ If you also conducted a logjam survey, the logjam data will be analysed in a separate script within this monitoring package (see Logjam_DataAnalysis.rmd and Logjam_DataAnalysis.html). Metrics generated in this LWD script will also be imported into that Logjam script, so please run this LWD script first.
+
+## Survey Locations
+
+LWD Survey locations are shown in the interactive map below. Users can toggle between basemaps and zoom in on the site(s) of interest. 
+
+```{r show study locations,echo=FALSE}
+
+
+
+# Select unique survey locations
+LWD_Survey_Locations <- lwd_data %>%
+  group_by(Site) %>%  
+  summarise(
+    Latitude = first(Reach_Start_Latitude),  # Ensure correct latitude column
+    Longitude = first(Reach_Start_Longitude),  # Ensure correct longitude column
+    .groups = "drop"
+  )
+
+# Convert data to sf object
+site_sf <- LWD_Survey_Locations%>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) # WGS84 coordinate system
+
+
+# Create interactive map with leaflet 
+leaflet_map <- leaflet() %>%
+  addTiles(group = "OpenStreetMap") %>%  # Default OpenStreetMap base layer
+  addProviderTiles("Esri.WorldImagery", group = "World Imagery") %>% # Additional basemap
+  addCircleMarkers(
+    data = site_sf,
+    radius = 5,
+    fillColor = "blue", # marker colour
+    fillOpacity = 1,
+    stroke = FALSE,
+    popup = ~Site) %>%
+  addLayersControl(
+    baseGroups = c("OpenStreetMap", "World Imagery"),  # Toggle basemap options
+    options = layersControlOptions(collapsed = FALSE)  # Keep control panel open
+  )
+
+
+leaflet_map
+
+```
+
+
+## LWD Metrics
+
+Here we generate some simple but useful reach-scale metrics calculated from your data of individual LWD pieces. These metrics are useful for comparing between 'before' or 'after' your restoration action and with reference to a control, and may also be comparable to benchmark values established in similar systems elsewhere.
+
+Some of the metrics incorporate volume estimates, which involve an additional assumption: that the observed LWD are cylindrical in shape. We apply the formula:
+
+\[
+V = \pi \left(\frac{d}{2}\right)^2 \cdot L
+\]
+
+Where:
+\(V\) is the piece volume (\(m^3\)),
+\(d\) is the diameter (\(m\)), and
+\(L\) is the length (\(m\)).
+
+__Note:__ If logjams were present within your focal reach, the reach-scale LWD metrics in this script should be considered only part of the total wood in the reach. We will use the tidied LWD data generated here in our Logjam_DataAnalysis.rmd script to calculate the proportion of LWD pieces aggregated in logjams versus those present as individual pieces. This will provide additional context for changes in LWD throughout the focal reach.  For example, we would not want to interpret a reduction in LWD volume as a reach losing wood, if in fact the LWD pieces just moved into a logjam.  
+
+
+
+```{r add calculated columns, echo = FALSE}
+# Add calculated columns (i.e., Volume) for lwd data
+lwd_data <- lwd_data %>%
+  mutate(Volume = (pi * (Diameter_m / 2)^2 * Length_m)) # Volume in m^3
+
+```
+
+
+You may need to scroll to see all of the metrics that are displayed in the below table. This table is also exported to your output folder.
+
+```{r summary LWD table, echo=FALSE, message=FALSE} 
+
+summary_table <- lwd_data %>%
+  group_by(Site,year) %>%
+  summarise(
+    #Total Number of pieces
+    Total_LWD = n(),
+    #Frequency of LWD (number of pieces per 100 m stream length)
+    Frequency_LWD = n() / first(Reach_Length) * 100,
+    #Average Diameter (m), na.rm = TRUE tells the function to remove any NA values in the data before performing the operation
+    Avg_Diameter_m = sprintf("%.2f (%.2f)", mean(Diameter_m, na.rm = TRUE), sd(Diameter_m, na.rm = TRUE)),
+    #Average Length (m)
+    Avg_Length_m   = sprintf("%.2f (%.2f)", mean(Length_m, na.rm = TRUE), sd(Length_m, na.rm = TRUE)),
+    #Average Volume
+    Avg_Volume     = sprintf("%.2f (%.2f)", mean(Volume, na.rm = TRUE), sd(Volume, na.rm = TRUE)),
+    #Volume per 100 m stream length (m3)
+    Volume_Per_100m = sum(Volume, na.rm = TRUE) / first(Reach_Length) * 100,
+    # Percent pieces wet
+    Percent_Wet = sum(Type == "Wet", na.rm = TRUE) / n() * 100,
+    # Percent rootwads present
+    Percent_Rootwads = sum(Rootwad == "Y", na.rm = TRUE) / n() * 100,
+    # Rootwads per 100 m stream length
+    Rootwads_Per_100m = sum(Rootwad == "Y", na.rm = TRUE) / first(Reach_Length) * 100
+  )
+
+LWD_table<-tags$div(
+  tags$h3("LWD Reach-Scale Metrics"), 
+  reactable(summary_table,searchable=TRUE, bordered=TRUE, highlight=TRUE,columns = list(
+    Site = colDef(name = "Site"),
+    year = colDef(name = "Year"),
+    Total_LWD = colDef(name= "Total LWD Pieces"),
+    Frequency_LWD = colDef(name = "Frequency of LWD (pieces per 100 m)", 
+                           format = colFormat(digits = 2)),
+    Avg_Diameter_m = colDef(name = "Mean Diameter (SD) / m", 
+                            format = colFormat(digits = 2)),
+    Avg_Length_m = colDef(name = "Mean Length (SD) / m",
+                          format = colFormat(digits = 1)),
+    Avg_Volume = colDef(name = "Mean Volume (SD) / m",
+                        format = colFormat(digits = 1)),
+    Volume_Per_100m = colDef(name = "Volume / m³ per 100 m", 
+                           format = colFormat(digits = 1)),
+    Percent_Wet = colDef(name = "Percent Wet Pieces", 
+                           format = colFormat(digits = 0)),
+    Percent_Rootwads = colDef(name = "Percent Rootwads Present", 
+                           format = colFormat(digits = 0)),
+    Rootwads_Per_100m = colDef(name = "Rootwads per 100 m", 
+                           format = colFormat(digits = 0)))))
+LWD_table
+
+# export the table
+export_table(as.data.frame(summary_table), "LWD_ReachScale_Metrics.csv")
+
+```
+
+
+The above table includes a number of metrics, all of which are frequently found in the scientific LWD literature. In the rest of this script we will produce visualisations of these metrics to assist you with your interpretation, and we will generate inferential tests of changes in LWD volume across time and between your restoration and control/reference site.
+
+
+## Data Visualization
+
+Before proceeding, refamiliarise yourself with your _a priori_ hypotheses and consider what your predictions are with regards to how your restoration action should have impacted each of these metrics. If you are not sure how the metric _should_ change, then interpret any changes very cautiously. It can be surprisingly easy to justify an unexpected result without necessarily understanding the mechanisms. 
+
+As previously mentioned, LWD pieces may be only a part of the wood in your reach. For safety and logistical reasons, we do not recommend measuring all the pieces of wood within logjams. If logjams are present, year-to-year variation in LWD population characteristics might be partially explained by movements of individual LWD into and out of the logjams. It is very possible that the population of wood in a logjam are distinct from the population of individual LWD pieces (e.g., perhaps logjams involve a few very large and many smaller pieces of LWD, whereas medium sized LWD is overrepresented as individual pieces). 
+
+### Physical Characteristics of LWD
+
+The boxplots below compare LWD length, diameter, and volume across sites and years. Each black dot represents a single observation. The solid black line within each box depicts the median for that site. The lower and upper hinges of the box correspond to the first and third quartiles, respectively. The upper whisker extends to the largest value no further than 1.5 times the inter-quartile range (1.5 x IQR), and the lower whisker extends to the smallest value no further than 1.5 x IQR. Any data points beyond these whiskers are considered outliers. 
+
+We are displaying boxplots with medians (as is typical), the values of which are less sensitive to outliers than the means (which are displayed in the above table). Boxplots are useful to better understand the spread of your data, however for LWD we think that the mean is a better summary statistic overall. Our rationale is that, if the outliers are real observations (and not transcription errors etc.), then those pieces of LWD may have very real and outsized influences on the habitat in question. Consider, for example, the potential impact of a single old-growth cedar falling in an otherwise wood-scarce stream - we would certainly want this occurrence to be reflected in our summary statistics. 
+
+Review the plots below, noting the distribution of the data and identifying any outliers. Consider whether these outliers reflect real observations or potential errors in the dataset. Examine the differences among years and/or sites.
+
+```{r Figure 1-3, echo=FALSE}
+
+
+
+Length_plot<-ggplot(lwd_data, aes(x = Site, y = Length_m, fill= year)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.6) +  # Avoid overlapping jittered points
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              size = 1, color="black", alpha=0.6, show.legend = FALSE) +  # Align jitter points with their respective bars
+  labs(
+    title = "LWD Length by Year and Site",
+    x = "Site",
+    y = "Length (m)"
+  ) +
+  scale_fill_viridis_d(option = "viridis")+
+  scale_x_discrete(labels = label_wrap(15)) + # label_wrap() function from the 'scales' package will wrap long labels so they don't overlap
+  scale_y_continuous(breaks = seq(0, max(lwd_data$Length_m, na.rm = TRUE), by = 2))  # Add more ticks# Use consistent colors, hide legend
+
+Length_plot
+
+Diameter_plot<-ggplot(lwd_data, aes(x = Site, y = Diameter_m, fill= year)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.6) +  # Avoid overlapping jittered points
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              size = 1, color="black", alpha=0.6, show.legend = FALSE) +  # Align jitter points with their respective bars
+  labs(
+    title = "LWD Diameter by Year and Site",
+    x = "Site",
+    y = "Diameter (m)"
+  ) +
+  scale_x_discrete(labels = label_wrap(15)) + # label_wrap() function from the 'scales' package will wrap long labels so they don't overlap
+  scale_fill_viridis_d(option = "viridis") 
+
+Diameter_plot
+
+Volume_plot<-ggplot(lwd_data, aes(x = Site, y = Volume, fill= year)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.6) +  # Avoid overlapping jittered points
+ geom_jitter(position = position_jitterdodge(jitter.width = 0.1, dodge.width = 0.8), 
+              size = 1, color="black", alpha=0.6, show.legend = FALSE) +  # Align jitter points with their respective bars
+  labs(
+   title = "LWD Volume by Year and Site",
+    x = "Site",
+    y = "Volume (m³)"
+  ) +
+  scale_x_discrete(labels = label_wrap(15)) + # label_wrap() function from the 'scales' package will wrap long labels so they don't overlap
+  scale_fill_viridis_d(option = "viridis")
+
+Volume_plot
+
+# Export figures
+export_plot(Length_plot, "LWD_Length_Boxplot_siteyear.pdf")
+export_plot(Diameter_plot, "LWD_DiameterBoxplot_siteyear.pdf")
+export_plot(Volume_plot, "LWD_VolumeBoxplot_siteyear.pdf")
+
+```
+
+
+### Distrubution of LWD within the Channel
+
+In this section we visualise LWD volume based on whether or not it was in contact with the wetted channel at the time of the survey (i.e., 'Wet' vs 'Dry' LWD). We recommended that the survey was conducted during base-flow / low flow conditions, in order to explore how much wood is available to fish to use during these times, when cover from predation and shading may also be elevated in importance. This data is therefore highly flow-dependent, and comparisons across years should be accompanied by flow data if there is not a well-matched control site available. 
+
+
+```{r Figure 4, echo=FALSE} 
+  
+Prop_Wet_vs_Dry <-lwd_data %>%
+  group_by(Site, year,Type) %>%
+  summarise(
+    Total_Volume = sum(Volume, na.rm = TRUE), 
+    .groups = "drop"
+  ) %>%
+  group_by(Site, year) %>%
+  mutate(
+    Percent_Volume = Total_Volume / sum(Total_Volume) * 100
+  ) %>%
+  ungroup() %>%
+  complete(Site, Type, year, fill = list(Percent_Volume = 0)) %>%
+  
+ggplot(aes(x = factor(year), y = Percent_Volume, fill = Type)) +
+  geom_bar(stat = "identity", position = "stack", alpha=0.6) +  
+  labs(
+    title = "Proportion of Total Wood Volume by Wood Type and Year",
+    x = "Year",
+    y = "Percent (%)",
+    fill = "Wood Type"
+  ) +
+  theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right" 
+  ) +
+  scale_fill_viridis_d(option = "viridis") +  
+  facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots 
+
+Prop_Wet_vs_Dry
+
+# Export figure
+export_plot(Prop_Wet_vs_Dry, "LWD_Prop_Wet_vs_Dry.pdf")
+
+
+```
+
+### LWD Orientation 
+
+LWD orientation controls the potential for flow convergence and divergence, influencing pool formation and sites for sediment storage (Magilligan et al., 2008). In general, large wood oriented perpendicular to the thalweg is associated with pool formation (Cherry and Beschta 1989; Richmond and Fausch 1995; Hauer et al. 1999). The below plots illustrate the LWD frequency (number of pieces) and the percentage of volume based on their orientation. This is useful to interpret if you have particular desires or expectations for orientation or, perhaps more likely, you would like the orientations within your restored reach to resemble that of a natural reference channel.
+
+```{r Figures 5-6, echo=FALSE, warning=FALSE}  
+
+# Calculate relative frequency of Orientation by Site
+  orientation_summary <- lwd_data %>%
+    group_by(Site, year, Orientation) %>%
+    summarise(Count = n(), .groups = "drop") %>%  # Count the number of each Orientation per Site and year
+    complete(Site, year, Orientation, fill = list(Count = 0)) %>%  # Fill in missing combinations with zeros
+    group_by(Site, year) %>%
+    mutate(Relative_Percent = Count / sum(Count)*100)  # Calculate relative frequencies
+  
+  
+  # Create a named vector for descriptive labels
+  orientation_labels <- c(
+    "A" = "Parallel",
+    "B" = "Perpendicular",
+    "C" = "Oblique to flow, larger-diameter end oriented upstream",
+    "D" = "Oblique to flow, larger-diameter end oriented downstream",
+    "E" = "Oblique to flow, larger-diameter end is unclear"
+  )
+
+  # wrap the orientation labels so they fit on the plot  
+ wrapped_orientation_labels <- str_wrap(orientation_labels, width = 30)
+  
+  # Ensure Orientation is a factor with levels matching orientation_labels
+orientation_summary$Orientation <- factor(
+  orientation_summary$Orientation, 
+  levels = names(orientation_labels)  # Align levels with keys of orientation_labels
+)
+
+
+  ##Create a stacked bar plot 
+ Orient_by_Piece <- ggplot(orientation_summary, aes(x = year, y = Relative_Percent, fill = Orientation)) +
+    geom_bar(stat = "identity", position="stack", alpha=0.6) +  #stack the bar plot
+    labs(
+      title = "Frequency of LWD within each Orientation Category (by piece)",
+      x = "Year",
+      y = "Percent (%)",
+      fill = "Orientation"
+    ) +
+    theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right"
+  ) +
+    scale_fill_viridis_d(labels= wrapped_orientation_labels, option="viridis") +  # Use viridis palette for discrete fill 
+   facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots 
+
+ Orient_by_Piece
+ 
+ # Export figure
+export_plot(Orient_by_Piece, "LWD_Orient_by_Piece.pdf")
+  
+###########################################################################
+  # Compare the volume of LWD that contributes to each orientation category 
+
+# Summarize data for proportions
+orientation_volume_summary <- lwd_data %>%
+  group_by(Site,year, Orientation) %>%
+  summarise(Total_Volume = sum(Volume, na.rm = TRUE), .groups = "drop") %>%
+  group_by(Site,year) %>%
+  mutate(Proportion = Total_Volume / sum(Total_Volume)*100) %>%  # Calculate proportions
+  ungroup()
+
+# Add missing orientation categories (ensure all combinations are present)
+orientation_volume_summary <- orientation_volume_summary %>%
+  complete(Site, year, Orientation, fill = list(Total_Volume = 0, Proportion = 0))
+
+# Create a named vector for descriptive labels
+orientation_labels <- c(
+  "A" = "Parallel",
+  "B" = "Perpendicular",
+  "C" = "Oblique to flow, larger-diameter end oriented upstream",
+  "D" = "Oblique to flow, larger-diameter end oriented downstream",
+  "E" = "Oblique to flow, larger-diameter end is unclear"
+)
+
+# Ensure Orientation is a factor with levels matching orientation_labels
+orientation_volume_summary$Orientation <- factor(
+  orientation_volume_summary$Orientation, 
+  levels = names(orientation_labels), 
+  labels = orientation_labels
+)
+
+  # wrap the orientation labels so they fit on the plot  
+ wrapped_orientation_labels <- str_wrap(orientation_labels, width = 30)
+
+
+# Create a stacked bar plot
+Orient_by_Volume <- ggplot(orientation_volume_summary, aes(x = year, y = Proportion, fill = Orientation)) +
+  geom_bar(stat = "identity", position = "stack", alpha=0.6) +
+  labs(
+    title = "Percentage of LWD Volume within each Orientation Category",
+    x = "Year",
+    y = "Percent (%)",
+    fill = "Orientation"
+  ) +
+    theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right"
+  ) +
+    scale_fill_viridis_d(labels= wrapped_orientation_labels, option="viridis") +  # Use viridis palette for discrete fill 
+    facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots 
+
+Orient_by_Volume
+
+
+# Export figure
+export_plot(Orient_by_Volume, "LWD_Orient_by_Volume.pdf")
+  
+```  
+
+### LWD Stability
+
+The stability metric helps to characterize the relative mobility of LWD based on its position within the channel, degree of burial, and association with other wood (Wohl et al. 2010). Stability categories may also provide information about the geomorphic function of the wood (e.g., promotion of scour, retention of sediment, recruitment method) (Wohl et al. 2010).  For instance, LWD that is unstable and frequently mobilized may create only temporary sediment storage (Wohl et al., 2009; Cadol and Wohl, 2011). This information may be particularly informative for adaptive management in cases where LWD stability is deemed to be of critical importance.
+
+```{r Figures 7-8, echo=FALSE,warning=FALSE}
+
+# Calculate relative frequency of Stability Class by Site
+  stability_summary <- lwd_data %>%
+    group_by(Site, year, Stability) %>%
+    summarise(Count = n(), .groups = "drop") %>%  # Count the number of each stability class per Site
+    complete(Site, year, Stability, fill = list(Count = 0)) %>%  # Fill in missing combinations with zeros
+    group_by(Site,year) %>%
+    mutate(Relative_Percent = Count / sum(Count)*100)  # Calculate relative frequencies
+
+
+  ##Create a stacked bar plot 
+Stability_by_Piece <-  ggplot(stability_summary, aes(x = year, y = Relative_Percent, fill = Stability)) +
+    geom_bar(stat = "identity", position= "stack", alpha=0.6) +  #stack the bar plot
+    labs(
+      title = "Frequency of LWD within each Stability Category (by piece)",
+      x = "Year",
+      y = "Percent (%)",
+      fill = "Stability"
+    ) +
+    theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right"
+  ) +
+    scale_fill_viridis_d(option="viridis") +  # Use viridis palette for discrete fill 
+   facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots 
+
+Stability_by_Piece
+
+
+# Export figure
+export_plot(Stability_by_Piece, "LWD_Stability_by_Piece.pdf")
+
+  
+########################################################################### 
+  # Compare the volume of LWD that contributes to each stability category 
+  
+stability_volume_summary <- lwd_data %>%
+  group_by(Site,year, Stability) %>%
+  summarise(Total_Volume = sum(Volume, na.rm = TRUE), .groups = "drop") %>%  # Sum the volume of LWD for each stability class
+  complete(Site, year, Stability, fill = list(Total_Volume = 0)) %>%  # Fill in missing combinations with zeros
+  group_by(Site, year) %>%
+  mutate(Relative_Percent = Total_Volume / sum(Total_Volume) * 100)  # Calculate relative percentages
+
+  ##Create a stacked bar plot 
+Stability_by_Volume <-  ggplot(stability_volume_summary, aes(x = year, y = Relative_Percent, fill = Stability)) +
+    geom_bar(stat = "identity", position= "stack", alpha=0.6) +  #stack the bar plot
+    labs(
+      title = "Percentage of LWD Volume within each Stability Category",
+      x = "Year",
+      y = "Percent (%)",
+      fill = "Stability"
+    ) +
+    theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right"
+  ) +
+    scale_fill_viridis_d(option="viridis") +  # Use viridis palette for discrete fill 
+    facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots
+
+
+Stability_by_Volume
+
+# Export figure
+export_plot(Stability_by_Volume, "LWD_Stability_by_Volume.pdf")
+
+
+```
+
+### Proportion of LWD with Rootwads 
+
+The presence or absence of a rootwad can provide information on relative stability and function of the piece (e.g., ability to modify local hydraulic conditions, complexity of cover for fish; Abbe et al., 1997; Braudrick and Grant, 2000). 
+
+```{r Figure 9, echo=FALSE} 
+
+# Calculate relative frequency of rootwads by site and year
+
+  rootwad_summary <- lwd_data %>%
+    group_by(Site, year, Rootwad) %>%
+    summarise(Count = n(), .groups = "drop") %>%  # Count the number of each stability class per Site
+    group_by(Site,year) %>%
+    mutate(Relative_Percent = Count / sum(Count)*100)  # Calculate relative frequencies
+
+
+  ##Create a stacked bar plot 
+Prop_Rootwad <-  ggplot(rootwad_summary, aes(x = year, y = Relative_Percent, fill = Rootwad)) +
+    geom_bar(stat = "identity", position= "stack", alpha=0.6) +  #stack the bar plot
+    labs(
+      title = "Proportion of LWD with Rootwads",
+      x = "Year",
+      y = "Percent (%)",
+      fill = "Rootwad Absence/Presence"
+    ) +
+    theme(
+    strip.text = element_text(face = "bold", size = 10),  # Facet title styling
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels 
+    legend.position = "right"
+  ) +
+    scale_fill_viridis_d(option="viridis", labels=c("N"="Absent","Y"="Present")) +  # Use viridis palette for discrete fill 
+   facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T) # wraps long site names, repeats x-axis ticks for all faceted plots
+
+Prop_Rootwad
+
+# Export figure
+export_plot(Prop_Rootwad, "LWD_Prop_Rootwad.pdf")
+
+```
+
+
+The tables and plots generated in the sections above may be useful for tracking changes over time, or comparing reference/control reaches. You can interpret whether the changes are in the predicted direction and of meaningful magnitude. For LWD metrics that have one value per reach (e.g., LWD frequency), the metrics themselves cannot be evaluated statistically (unless you have a large number of reaches/years). 
+
+For LWD metrics that have many values per reach (e.g., LWD volume by piece), we can apply inferential statistical tests to determine whether the differences we observed among reaches and years are likely to be due to chance. You will be familiar with p values of 0.05 (observed result expected just due to chance 1 in 20 times) and we will use p=0.05 as our cut-off here. However, depending on your adaptive management plans, you may be willing to accept different levels of certainty, and p values of 0.1 are not unheard of in restoration projects. This all depends on the risk tolerance of you and your team, and should be established before conducting analyses.
+
+__Note:__ In instances where no logjams are present, we can interpret LWD volume as representing all wood in the focal reach. However, when logjams _are_ present, LWD volume should be interpreted alongside logjam data (evaluated separately in the Logjam_DataAnalysis.rmd script). The rationale being that, since wood can move into and out of logjams over time, individual pieces contributing to LWD volume estimates one year may later become part of a jam. This dynamic can create an apparent decline in volume over time, even if total wood remains within the focal reach. 
+
+## Inferential Tests
+
+For these inferential tests we will use ANOVA (Analysis of Variance) because of its applicability and familiarity for ecologists. We will test for differences in *LWD volume* between sites, years, and an interaction of sites*years (i.e., did the different locations change differently over time).  This interaction test is the key to teasing apart natural variability in our metrics from the effects of our restoration action, if we can assume that our restoration site and control/reference sites are otherwise identical. For example, we might see drastic changes in LWD volume at both restoration and control sites during a year with a large freshet. The interaction test assesses whether the change at one site is distinct from that at the other, even if they both changed significantly from the last survey year. It will be up to you to interpret these occurrences based on your hypotheses.
+
+### Assumption Robustness
+
+Whenever applying statistical tests, we should ensure that our data is suitable, in that it meets the assumptions of the intended inferential test. For ANOVA the assumptions are:
+
+- Data in different groups should be independent: 
+  - One of your sites must not cause changes in another (though both sites experiencing shared 'external' causal factors, such as being in the same watershed, is acceptable). This is hopefully accounted for by good selection of impact/control/reference sites. 
+  - You may note that no site is actually independent from that same site in the past. For longer time-series we would adopt a different inferential approach to avoid autocorrelation, but here we are dealing with simple before vs after comparisons, and it is widely accepted that ANOVAs are suitable for before/after comparisons if the comparison is balanced (e.g., 2 years of before data compared with 2 years of after data).
+- Residuals are normally distributed: Residuals are the difference between each datapoint and the mean. We will examine this assumption using Q-Q plots and the Shapiro-Wilk normality test.
+- Homoscedasticity: Variance should be broadly equal across all groups. We will test this with Levene's test.
+
+If any of these assumptions are violated, we can transform the data and test whether the transformed data (log-, arcsine- etc.) satisfies the assumptions. If this is not an option, we should seek a more suitable statistical test (e.g. Welch's ANOVA or mixed-effects models). We include code to transform data below.
+
+Before checking the assumptions of the inferential test, we must specify the 'before' and 'after' data that you wish to compare.
+
+#### Before / After Years
+
+Enter in the below code the years that you consider 'before' and 'after' your restoration action, you may have more than one year in each category. Remember that these should balance (equal number of years before as after), but they need not be consecutive years. If you do not have balanced data (e.g., only one year was possible before project implementation) be very cautious in running and interpreting an ANOVA. You could select only a subset of your data to keep the comparison balanced, but if you do this for more than one set of dates you must account for the multiple comparisons inflating the likelihood of a Type I error (false positive). You should also be aware of your own bias: Do not select years to compare just because they appear to show the anticipated pattern or a distinct change.
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+``` {r categorise years, echo=FALSE}
+# Categorize years
+lwd_data <- lwd_data %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+```
+
+#### LWD Volume Diagnostics
+
+This next section of code generates tests and figures that you should review to ensure your LWD volume data are suitable for an ANOVA. In brief, look for the following:
+
+- Boxplots: consider whether outliers (dots) are real or errors
+- Q-Q plots: a reasonably straight line of points means alignment with normal distribution
+- Normality test (Shapiro-Wilk): p<0.05 indicates non-normality
+- Levene's test: p<0.05 indicates that variance among groups differs
+- Skewness values < 0 are left skewed, > 0 right skewed. Kurtosis values < 3 light-tailed, > 3 heavy-tailed.
+
+
+```{r normality assumptions etc, echo = FALSE}
+# Filter out sites without both time categories. 
+lwd_data_filtered <- lwd_data %>%
+  group_by(Site) %>%
+  filter(all(c("Before", "After") %in% Time_Category)) %>%
+  ungroup()
+
+############################ generate boxplots. Look out for outliers
+
+generate_boxplots <- function(lwd_data_filtered) {
+  variables <- c("Volume")
+  boxplots_list <- list()
+  
+  for (var in variables) {
+    boxplot <- ggplot(lwd_data_filtered, aes(x = interaction(Site, Time_Category), y = .data[[var]])) +
+      geom_boxplot() +
+      labs(title = paste("Boxplot of", var), x = "Site-Time Category", y = var) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    boxplots_list[[var]] <- boxplot
+  }
+  return(boxplots_list)
+}
+
+# Generate boxplots
+boxplots <- generate_boxplots(lwd_data_filtered)
+
+# Display boxplots
+for (plot in boxplots) {
+  print(plot)
+} # Look out for outliers
+
+
+############################# generate Q-Q plots. Look for deviations from linearity
+
+generate_qqplots <- function(lwd_data_filtered) {
+  # Create a list of variables to plot
+  variables <- c("Volume")
+  
+  # Initialize a list to store the Q-Q plots
+  qqplots_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    qqplot <- ggplot(lwd_data_filtered, aes(sample = .data[[var]])) +  
+      stat_qq() +
+      stat_qq_line() +
+      labs(title = paste("Q-Q Plot of", var)) +
+      facet_wrap(~ interaction(Site, Time_Category))
+    
+    # Add the plot to the list
+    qqplots_list[[var]] <- qqplot
+  }
+  
+  # Return the list of Q-Q plots
+  return(qqplots_list)
+}
+
+# Generate Q-Q plots
+qqplots <- generate_qqplots(lwd_data_filtered)
+
+# Display Q-Q plots
+for (plot in qqplots) {
+  print(plot)
+}  # Look for deviations from linearity
+
+############################# test for normality 
+    
+test_normality <- function(lwd_data_filtered) {
+  
+  # Split the dataset into subsets by Site and Time_Category
+  volume_summary_grouped <- split(lwd_data_filtered, list(lwd_data_filtered$Site, lwd_data_filtered$Time_Category))
+  
+  # Initialize an empty list to store normality test results
+  normality_results_list <- list()
+  
+  # Loop through each grouped subset (Site + Time_Category)
+  for (group_name in names(volume_summary_grouped)) {
+    group <- volume_summary_grouped[[group_name]] # Extract the data for the current group
+    
+    # Check if the group has fewer than 3 observations (Shapiro-Wilk requires at least 3)
+    if (nrow(group) < 3) {
+    # Store a placeholder result indicating insufficient data
+      normality_results_list[[group_name]] <- data.frame(
+        Site = NA, Time_Category = NA,
+        Volume_p_value = NA,
+        message = "Not enough data for normality test"
+      )
+      next # Skip to the next group
+    }
+    
+    # Perform Shapiro-Wilk test for normality on the 'Volume' variable
+    volume_test <- shapiro.test(group$Volume)
+  
+     # Store the test result in a dataframe
+    normality_results_list[[group_name]] <- data.frame(
+      Site = unique(group$Site),  # Extract unique Site value
+      Time_Category = unique(group$Time_Category), # Extract unique Time_Category
+      volume_p_value = volume_test$p.value, # Extract p-value from Shapiro-Wilk test
+      message = "Normality test completed"
+    )
+  }
+    # Combine all individual group results into a single dataframe
+  normality_results_df <- do.call(rbind, normality_results_list)
+  # Return the final dataframe containing normality test results
+  return(normality_results_df)
+}
+
+# Run the normality test function on the filtered dataset
+normality_results <- test_normality(lwd_data_filtered)
+
+# Format and display the results
+normality_results %>%
+  mutate(
+    volume_p_value = round(volume_p_value, 3)
+  ) %>%
+  kable(
+    caption = "Normality Test Results for LWD Volume Data",
+    col.names = c("Site", "Time Category", 
+                  "Volume P-Value", 
+                  "Message"),
+    align = "c",  # Center-align the columns
+    row.names = FALSE
+  ) # look out for p values <0.05 which indicate non-normality 
+    
+
+
+############################  run Levene's Test 
+
+run_levenes_test <- function(lwd_data_filtered) {
+  # Create a list of variables to test
+  variables <- c("Volume")
+  
+  # Initialize a list to store Levene's test results
+  levene_results_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    levene_test <- leveneTest(as.formula(paste(var, "~ interaction(Site, Time_Category)", sep = "")), data = lwd_data_filtered)
+    
+    # Store the results in the list
+    levene_results_list[[var]] <- levene_test
+  }
+  
+  # Return the list of Levene's test results
+  return(levene_results_list)
+}
+
+# Run Levene's test
+levene_results <- run_levenes_test(lwd_data_filtered)
+
+# Display Levene's test results with variable names
+for (var_name in names(levene_results)) {
+  cat("\n--- Levene's Test Results for", var_name, "---\n")
+  print(levene_results[[var_name]])
+ # If p < 0.05 then variance *is* different among groups
+
+# Extract p-value and interpret results
+  p_value <- levene_results[[var_name]]$`Pr(>F)`[1]
+
+
+if (p_value < 0.05) {
+    cat("\nResult: Significant difference in variance for", var_name, 
+        "(p =", round(p_value, 3), "). Consider using non-parametric tests or transformations.\n")
+  } else {
+    cat("\nResult: No significant difference in variance for", var_name, 
+        "(p =", round(p_value, 3), "). ANOVA assumptions hold.\n")
+  }
+}
+
+######################### calculate skewness and kurtosis for LWD Volume
+
+calculate_skew_kurt <- function(lwd_data_filtered) {
+  # Create a list of variables to analyze
+  variables <- c("Volume")
+  
+  # Initialize a list to store the results
+  skew_kurt_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    skew <- skewness(lwd_data_filtered[[var]], na.rm = TRUE)
+    kurt <- kurtosis(lwd_data_filtered[[var]], na.rm = TRUE)
+    
+    # Store the results
+    skew_kurt_list[[var]] <- data.frame(
+      Variable = var,
+      Skewness = skew,
+      Kurtosis = kurt
+    )
+  }
+  
+  # Combine the results into a single dataframe
+  skew_kurt_df <- do.call(rbind, skew_kurt_list)
+  
+  return(skew_kurt_df)
+}
+
+# Calculate skewness and kurtosis
+skew_kurt_result <- calculate_skew_kurt(lwd_data_filtered)
+
+# Display skewness and kurtosis results
+print(skew_kurt_result)
+
+
+```
+
+If, based on the above evaluation, your data appear to be unsuitable for the intended inferential test you may wish to use an alternative non-parametric test or transform the data. We provide some assistance for transformations here, but this part might require more work on your part since we cannot predict what your data will need.
+
+Having said that, we feel in many cases LWD volume data will need a simple log-transformation. Our rationale is that very large wood, although not frequent, would persist within the stream and create a long tail to the right of the distribution (non-normal skewness). Therefore, we provide the code to log-transform LWD volume, and apply this as default in the ANOVA. Note that if your above diagnostics indicated your data is already normal, then you can edit the ANOVA code to run on 'Volume' rather than 'transformed_Volume' (we will indicate where this is done in the code).
+
+The code we used for the log-transformation is below. We followed these steps, and the code can be edited for other forms of transformation: 
+
+### Transformation Steps
+
+1. Add the transformation(s) to the code chunk below. We add a formula to calculate a transformation for the applicable variable within *transformations <- list(...)*. In this case there is only one variable 'Volume' and we add a log-transformation: 'function(x) ifelse(x > 0, log(x), NA),'
+
+2. We re-run the diagnostics code after updating the applicable variable name(s) for each diagnostic test. The code chunk for the diagnostics (above in the .rmd file) is repeated below, but wherever it read '*variables <- c("Volume")*' we updated the variable name(s) to "*transformed_*Volume"
+
+3. Once we have a transformed variable that meets the assumptions of the ANOVA, we update the ANOVA inferential test code to use the "*transformed_*variable_name"
+
+
+```{r transformation function, echo = FALSE}
+# Function to apply transformations and append to the dataframe
+apply_transformations <- function(data, transformations) {
+  for (var in names(transformations)) {
+    transform_fn <- transformations[[var]]
+    transformed_var <- paste0("transformed_", var)
+    # Apply the transformation and append as a new column
+    data[[transformed_var]] <- transform_fn(data[[var]])
+  }
+  return(data)
+}
+```
+
+``` {r transformations}
+# Define transformations as a named list. You can add appropriate transformations here, then be sure to also amend the anova code to call the correct variable
+# Use 'identity' if no transformation is needed
+transformations <- list(
+  Volume = function(x) ifelse(x > 0, log(x), NA)  # example code: replace 'function(x) ifelse(x > 0, log(x), NA),' with 'identity,' if no transformation is required
+)
+
+# Apply transformations and update the dataframe
+lwd_data_filtered <- apply_transformations(lwd_data_filtered, transformations)
+```
+
+
+So following our assumption of volume being non-normal, the following diagnostics inform us whether our log-transformed volume data is an appropriate variable for an ANOVA. 
+
+
+
+```{r normality assumptions WITH transformations, echo = FALSE}
+############################ generate boxplots. Look out for outliers
+
+generate_boxplots <- function(lwd_data_filtered) {
+  variables <- c("transformed_Volume")
+  boxplots_list <- list()
+  
+  for (var in variables) {
+    boxplot <- ggplot(lwd_data_filtered, aes(x = interaction(Site, Time_Category), y = .data[[var]])) +
+      geom_boxplot() +
+      labs(title = paste("Boxplot of", var), x = "Site-Time Category", y = var) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    boxplots_list[[var]] <- boxplot
+  }
+  return(boxplots_list)
+}
+
+# Generate boxplots
+boxplots <- generate_boxplots(lwd_data_filtered)
+
+# Display boxplots
+for (plot in boxplots) {
+  print(plot)
+} # Look out for outliers
+
+
+############################# generate Q-Q plots. Look for deviations from linearity
+
+generate_qqplots <- function(lwd_data_filtered) {
+  # Create a list of variables to plot
+  variables <- c("transformed_Volume")
+  
+  # Initialize a list to store the Q-Q plots
+  qqplots_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    qqplot <- ggplot(lwd_data_filtered, aes(sample = .data[[var]])) +  
+      stat_qq() +
+      stat_qq_line() +
+      labs(title = paste("Q-Q Plot of", var)) +
+      facet_wrap(~ interaction(Site, Time_Category))
+    
+    # Add the plot to the list
+    qqplots_list[[var]] <- qqplot
+  }
+  
+  # Return the list of Q-Q plots
+  return(qqplots_list)
+}
+
+# Generate Q-Q plots
+qqplots <- generate_qqplots(lwd_data_filtered)
+
+# Display Q-Q plots
+for (plot in qqplots) {
+  print(plot)
+}  # Look for deviations from linearity
+
+############################# test for normality 
+    
+test_normality <- function(lwd_data_filtered) {
+  
+  # Split the dataset into subsets by Site and Time_Category
+  volume_summary_grouped <- split(lwd_data_filtered, list(lwd_data_filtered$Site, lwd_data_filtered$Time_Category))
+  
+  # Initialize an empty list to store normality test results
+  normality_results_list <- list()
+  
+  # Loop through each grouped subset (Site + Time_Category)
+  for (group_name in names(volume_summary_grouped)) {
+    group <- volume_summary_grouped[[group_name]] # Extract the data for the current group
+    
+    # Check if the group has fewer than 3 observations (Shapiro-Wilk requires at least 3)
+    if (nrow(group) < 3) {
+    # Store a placeholder result indicating insufficient data
+      normality_results_list[[group_name]] <- data.frame(
+        Site = NA, Time_Category = NA,
+        Volume_p_value = NA,
+        message = "Not enough data for normality test"
+      )
+      next # Skip to the next group
+    }
+    
+    # Perform Shapiro-Wilk test for normality on the 'Volume' variable
+    volume_test <- shapiro.test(group$transformed_Volume)
+  
+     # Store the test result in a dataframe
+    normality_results_list[[group_name]] <- data.frame(
+      Site = unique(group$Site),  # Extract unique Site value
+      Time_Category = unique(group$Time_Category), # Extract unique Time_Category
+      volume_p_value = volume_test$p.value, # Extract p-value from Shapiro-Wilk test
+      message = "Normality test completed"
+    )
+  }
+    # Combine all individual group results into a single dataframe
+  normality_results_df <- do.call(rbind, normality_results_list)
+  # Return the final dataframe containing normality test results
+  return(normality_results_df)
+}
+
+# Run the normality test function on the filtered dataset
+normality_results <- test_normality(lwd_data_filtered)
+
+# Format and display the results
+normality_results %>%
+  mutate(
+    volume_p_value = round(volume_p_value, 3)
+  ) %>%
+  kable(
+    caption = "Normality Test Results for LWD Volume Data",
+    col.names = c("Site", "Time Category", 
+                  "Volume P-Value", 
+                  "Message"),
+    align = "c",  # Center-align the columns
+    row.names = FALSE
+  ) # look out for p values <0.05 which indicate non-normality 
+    
+
+
+############################  run Levene's Test 
+
+run_levenes_test <- function(lwd_data_filtered) {
+  # Create a list of variables to test
+  variables <- c("transformed_Volume")
+  
+  # Initialize a list to store Levene's test results
+  levene_results_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    levene_test <- leveneTest(as.formula(paste(var, "~ interaction(Site, Time_Category)", sep = "")), data = lwd_data_filtered)
+    
+    # Store the results in the list
+    levene_results_list[[var]] <- levene_test
+  }
+  
+  # Return the list of Levene's test results
+  return(levene_results_list)
+}
+
+# Run Levene's test
+levene_results <- run_levenes_test(lwd_data_filtered)
+
+# Display Levene's test results with variable names
+for (var_name in names(levene_results)) {
+  cat("\n--- Levene's Test Results for", var_name, "---\n")
+  print(levene_results[[var_name]])
+ # If p < 0.05 then variance *is* different among groups
+
+# Extract p-value and interpret results
+  p_value <- levene_results[[var_name]]$`Pr(>F)`[1]
+
+
+if (p_value < 0.05) {
+    cat("\nResult: Significant difference in variance for", var_name, 
+        "(p =", round(p_value, 3), "). Consider using non-parametric tests or transformations.\n")
+  } else {
+    cat("\nResult: No significant difference in variance for", var_name, 
+        "(p =", round(p_value, 3), "). ANOVA assumptions hold.\n")
+  }
+}
+
+######################### calculate skewness and kurtosis for LWD Volume
+
+calculate_skew_kurt <- function(lwd_data_filtered) {
+  # Create a list of variables to analyze
+  variables <- c("transformed_Volume")
+  
+  # Initialize a list to store the results
+  skew_kurt_list <- list()
+  
+  # Iterate over each variable
+  for (var in variables) {
+    skew <- skewness(lwd_data_filtered[[var]], na.rm = TRUE)
+    kurt <- kurtosis(lwd_data_filtered[[var]], na.rm = TRUE)
+    
+    # Store the results
+    skew_kurt_list[[var]] <- data.frame(
+      Variable = var,
+      Skewness = skew,
+      Kurtosis = kurt
+    )
+  }
+  
+  # Combine the results into a single dataframe
+  skew_kurt_df <- do.call(rbind, skew_kurt_list)
+  
+  return(skew_kurt_df)
+}
+
+# Calculate skewness and kurtosis
+skew_kurt_result <- calculate_skew_kurt(lwd_data_filtered)
+
+# Display skewness and kurtosis results
+print(skew_kurt_result)
+
+
+```
+
+This transformation worked for our volume data. Check through the above diagnostics for your data. Hopefully either the Volume data or the transformed_Volume data are suitable for an ANOVA. If not, you may wish to attempt other transformations using the *transformations <- list(...)* line in the tranformation code chunk.
+
+### ANOVA 
+
+Once you have satisfied yourself that your data (or transformed data) are suitable, we will run the inferential tests. We use ANOVA to ask whether LWD Volume differs among sites, years, and site*year interactions:
+
+
+Ensure the code below references the correct variable based on whether or not transformed data is necessary. We default to log-transformed volume, but this can be altered (e.g., change "transformed_Volume" to "Volume")
+
+```{r inferential tests}
+# Function to run ANOVA for a given variable
+run_anova <- function(data, variable) {
+  formula <- as.formula(paste(variable, "~ Site * Time_Category"))
+  anova_result <- aov(formula, data = data)
+  summary(anova_result)
+}     
+
+# Ensure transformed data is used in the ANOVA function if necessary (change the variable name in quotation marks in the following row: Volume or transformed_Volume)
+anova_Volume <- run_anova(lwd_data_filtered, "transformed_Volume")
+
+
+#print results
+print(anova_Volume)
+
+
+# Exporting a summary
+summary_text <- capture.output(anova_Volume)
+export_summary(summary_text, "LWD_Volume_anova")
+
+
+```
+
+
+
+Now that you have visualisations of the LWD data, and statistical tests to examine the statistical significance of differences in LWD volume among reaches and years, it is time to consider the biological/morphological significance and the implications for your project. If you had any logjams recorded in your reach, move onto the Logjam_DataAnalysis files and consider the results from that analysis alongside this one.
+
+If you conducted a longitudinal survey, you may also want to interpret the observed changes in LWD alongside any changes in pool frequency, dimensions, fine sediment extents etc. Wherever possible, refer back to your hypotheses and the expected causal mechanisms starting with your restoration actions, and hopefully you will see signals that your actions are having success in the metrics that are most relevant to your target species or reference condition.
+
+
+# References
+
+Abbe T.B., Montgomery D.R., Petroff C. (1997). Design of stable in-channel wood debris structures for bank protection and habitat restoration: An example from the Cowlitz River, WA. In Management of Landscapes Disturbed by Channel Incision, Wang SSY, Langendoen EJ, Shields FD (eds). University of Mississippi: Oxford, MS; 809–815.
+
+Braudrick C.A., Grant G.E. (2000). When do logs move in rivers? Water Resources Research 36: 571–584.
+
+Cadol D., Wohl E. (2011). Coarse sediment movement in the vicinity of a logjam in a neotropical gravel-bed stream. Geomorphology 128: 191–198.
+
+Cherry J., Beschta R.L. (1989). Coarse woody debris and channel morphology: A flume study. Water Resources Bulletin 25: 1031–1036.
+
+Hauer, F. R., G. C. Poole, J. T. Gangemi, C. V. Baxter. (1999). Large woody debris in buff trout (Salvelinus confluentus) spawning streams of logged and wilderness watersheds in northwest Montana. Canadian Journal of Fisheries and Aquatic Sciences 56:915-924.
+
+Magilligan, F. J., Nislow, K. H., Fisher, G. B., Wright, J., Mackey, G., Laser, M. (2008). The geomorphic function and characteristics of large woody debris in low gradient rivers, coastal Maine, USA. Geomorphology, 97(3–4), 467–482. https://doi.org/10.1016/j.geomorph.2007.08.016
+
+Richmond A.D., Fausch K.D. (1995). Characteristics and function of large woody debris in subalpine Rocky Mountain streams in northern Colorado. Canadian Journal of Fisheries and Aquatic Sciences 52: 1789–1802.
+
+Wohl, E., Cenderelli, D. A., Dwire, K. A., Ryan-Burkett, S. E., Young, M. K., Fausch, K. D. (2010). Large in-stream wood studies: A call for common metrics. Earth Surface Processes and Landforms, 35(5), 618–625. https://doi.org/10.1002/esp.1966
+
+Wohl E., Jaeger K. (2009). A conceptual model for the longitudinal distribution of wood in mountain streams. Earth Surface Processes and Landforms 34: 329–344.
+
+
