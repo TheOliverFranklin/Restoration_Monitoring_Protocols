@@ -1,0 +1,670 @@
+---
+title: "Logjam Data Analysis"
+author: "Nicci Zargarpour & Oliver Franklin"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    code_download: true 
+    
+---
+
+
+```{r setup, include=FALSE} 
+# Load required libraries and install any missing ones. This code loads the package to the work area and, if it is not installed, installs it.
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set all figures in the document to be the same width (max page width)
+knitr::opts_chunk$set(fig.width = 10, fig.height = 6, out.width = "100%")
+
+
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(rmarkdown,dplyr,tidyr,htmltools, leaflet, tidyverse,ggplot2,cowplot,knitr,readxl,kableExtra,sf,tmap,reactable,rmarkdown,viridis, stringr,gridExtra, DT, purrr, lubridate, htmlwidgets, scales,lemon,car, moments, leaflet.extras, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+
+# Apply a global theme to all plots (so that figure text is large enough)
+theme_set(theme_classic(base_size = 14))  # Adjust base font size globally
+```
+
+
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Figure Title.pdf")
+# export_plot(plotly_plot, "Figure Title.html")
+# 
+# # Exporting a table
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(mtcars)
+# export_summary(summary_text, "summary")
+```
+
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types for logjam data
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Reach_Start_Latitude  = "numeric",
+    Reach_Start_Longitude = "numeric",
+    Reach_End_Latitude    = "numeric",
+    Reach_End_Longitude   = "numeric",
+    Reach_Length          = "numeric",
+    Staff                 = "character",
+    Observer              = "character",
+    Logjam_WPT            = "numeric",
+    Logjam_Latitude       = "numeric",
+    Logjam_Longitude      = "numeric",
+    Jam_ID                = "character",
+    LWD_No.               = "numeric",
+    Length_m              = "numeric",
+    Width_m               = "numeric",
+    Height_m              = "numeric",
+    Type                  = "character",
+    Notes                 = "character"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+    return(df)
+}
+```
+
+*Before proceeding with this logjam script, you should run the LWD_DataAnalysis.rmd script. This is because this current script uses data that are generated from that LWD code. If you did not record logjams, there is no need to use this current script, but we recommend including logjams in any LWD survey to get a more complete understanding of wood in your focal area*
+
+Like the LWD script, we start by wrangling (tidying) your logjam data, before importing the LWD data. We then generate logjam metrics as well as calculating the proportion of total reach LWD that occurs in logjams (useful for investigating movement of large wood into and out of logjams over time). Finally, we consider the total frequency of LWD (individual pieces plus those within logjams) within a reach over time and with a reference/control site, to explore whether the changes you observe at your restoration site could be attributable to your actions.
+
+
+# Data Wrangling
+
+Data wrangling, or cleaning and structuring the data, is the first step before analysis. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+The first step is to combine all of the years and/or sites of logjam data that you wish to compare into one dataframe. Note that these files should not contain the individual LWD data, which have hopefully already been wrangled and will be imported here later.
+
+These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the logjam data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Note, logjam measurements should be in metres. 
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Logjam/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+    mutate(Type = case_when(           # handle text entries and standardize how these are named (try to catch caps/spelling issues)
+      str_detect(Type, regex("dam", ignore_case = TRUE)) ~ "Dam",
+      str_detect(Type, regex("parallel", ignore_case = TRUE)) ~ "Parallel",
+      str_detect(Type, regex("deflector", ignore_case = TRUE)) ~ "Deflector",
+      str_detect(Type, regex("underflow", ignore_case = TRUE)) ~ "Underflow",
+      TRUE ~ NA_character_               # Set to NA if no match is found
+    )) %>%
+  
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+It may be necessary to subset within this dataframe if, e.g., you included more than one focal reach in your .csv files (surveys of additional channels, tributaries etc.). These scripts are intended to analyse one focal reach, to compare it over time and with independent reference sites that also feature one reach. Note that your study may have included just the main channel, or perhaps also side-channels that were present. Ensure you are consistent from year-to-year and between sites, and preferably also among different monitoring protocols.  The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways.
+
+``` {r subset option}
+#df <- subset(df, Site %in% c("Site 1", "Site 2")) 
+
+# if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channel within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
+```
+
+Let's take a look at the dataframe. 
+
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+
+Take a look through the dataframe and ensure there are no errors and to explore unusual entries. In some places, you may have missing entries or 'NA', when a value of '0' is more appropriate. For example, where you did not record any logjams this is presumably because there was '0' presence, and this absence of logjams is informative. In such cases, we automatically will replace missing entries with '0'.
+
+```{r missing values, echo = FALSE}
+df$LWD_No. <- ifelse(is.na(df$LWD_No.), 0, df$LWD_No.) ## alter to suit your column names, if necessary
+
+```
+
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we also isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to 'ymd', 'myd', 'dym', etc.):
+
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$year <- year(df$parsed_date)        # Extract the year
+```
+
+## Export Data
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/LWD"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from the LWD and logjam scripts. Some of the outputs (dataframes) may be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+
+We will now export the tidied dataframe so that it can be used in future as needed. Check your file folder and the .csv files to see the data you exported before moving on.
+
+```{r df export, echo = FALSE}
+export_table(as.data.frame(df),"Logjam_dataframe.csv")
+
+logjam_data<- df
+```
+
+
+We also need to import the LWD dataframe that was generated from the Large Woody Debris (LWD) Data Analysis script. If you have specified the same output folder for both LWD and logjam files, this should happen automatically. If you used a different output folder for each, you should be prompted now to enter the location for the LWD dataframe. Note that if you have renamed the dataframe in your output folder, you will have to align the new name in the code that appears below in the .rmd document.
+
+
+``` {r LWD import, echo = FALSE}
+# Try to import LWD_dataframe.csv from output_folder
+lwd_file <- file.path(output_folder, "LWD_dataframe.csv")
+
+if (file.exists(lwd_file)) {
+  lwd_data <- read.csv(lwd_file)
+  message("Loaded LWD_dataframe.csv from: ", lwd_file)
+} else if (interactive()) {
+  # Prompt user for folder location until valid file is found
+  message("LWD_dataframe.csv not found in the default folder.")
+  repeat {
+    alt_folder <- readline(prompt = "Specify folder location of LWD_dataframe.csv: ")
+    alt_file <- file.path(alt_folder, "LWD_dataframe.csv")
+    if (file.exists(alt_file)) {
+      lwd_data <- read.csv(alt_file)
+      message("Loaded LWD_dataframe.csv from: ", alt_file)
+      break
+    } else {
+      message("File not found in specified folder. Please try again.")
+    }
+  }
+} else {
+  stop("LWD_dataframe.csv not found in the default folder and script is not running interactively.")
+}
+
+```
+
+# Logjam Analysis
+
+The objective of our logjam field survey procedure is to provide a repeatable methodology that can be used to monitor the abundance, characteristics and function of logjams in wadeable streams. Compared to individual pieces of LWD, logjams can have greater stability (Wohl and Goode, 2008) and exert more substantial geomorphic and ecological influences (Bilby and Likens, 1980; Abbe and Montgomery, 2003; O’Connor et al., 2003). When present, logjams are an important component of the total wood in a reach, and monitoring the spatial distribution and size of logjams can provide information regarding the dynamics of habitat formation. It may also be of value to pair these analyses with longitudinal surveys to detect the potential effects of this wood on stream morphology (e.g., residual pool depth, dammed pool frequency, presence of fine sediments).
+
+Before we dive into the analyses, let's briefly recall the survey methodology:
+
+Along each reach, logjams within the bankfull channel were identified and measured. For the purpose of this protocol, logjams were defined as collections of three or more pieces of LWD (i.e., ≥ 10 cm in diameter and ≥ 1 m long) that physically contact each other. The total number of pieces in the jam were tallied, dimensions were measured, and each jam was classified by type (based on a debris jam classification scheme developed by Wallerstein and Thorne 2004).  
+
+
+
+## Logjam Map 
+
+Logjam locations are shown in the interactive map below, coloured by year and with symbol sizes indicative of relative logjam area (width x length as measured in field). You can toggle between basemaps and select the sites/survey year(s) of interest. Solid circular points (coloured according to survey year) indicate logjam locations and are labelled with site, year, Jam ID, and area (clicka a point to see its label). Magenta X symbols indicate the start and end points of the focal reach(es).
+
+Note that the circle size indicates relative area among logjams by using the square-roots of each area (to account for the potential large range in logjam sizes). The size of the circle does not indicate the actual size of the logjam on the map. Also bear in mind that the area calculation is based on a square that would contain the logjam's footprint - it does not mean that the full area is comprised of wood, nor does it contain any height information. But with this in mind, we feel that a simple visual representation on the map of both location and size can be very helpful in understanding how logjams move and change over time.
+ 
+```{r logjam locations and sizes, echo = FALSE, warning = FALSE}
+# 1. Calculate Logjam Area
+logjam_data <- logjam_data %>%
+  mutate(logjam_Area = Length_m * Width_m)
+
+# 2. Select unique logjam locations and carry area forward
+logjam_unique <- logjam_data %>%
+  group_by(Site, year, Jam_ID) %>%
+  summarise(
+    Latitude = first(Logjam_Latitude),
+    Longitude = first(Logjam_Longitude),
+    Area_m2 = first(logjam_Area),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Site_Year = paste(Site, year, sep = "-"),
+    Scaled_Radius = rescale(sqrt(Area_m2), to = c(3, 15), na.rm = TRUE)  # scale sqrt(area) to 3-15 pixels. sqrt due to potential large range of logjam sizes
+  )
+
+# 3. Create color palette
+year_palette <- colorFactor(
+  palette = viridis(length(unique(logjam_unique$year))),
+  domain = logjam_unique$year
+)
+
+# 4. Extract reach start/end points
+reach_points <- logjam_data %>%
+  group_by(Site, year) %>%
+  summarise(
+    Start_Latitude = first(Reach_Start_Latitude),
+    Start_Longitude = first(Reach_Start_Longitude),
+    End_Latitude = first(Reach_End_Latitude),
+    End_Longitude = first(Reach_End_Longitude),
+    .groups = "drop"
+  ) %>%
+  mutate(Site_Year = paste(Site, year, sep = "-"))
+
+# 5. Get unique Site-Year combos
+site_year_groups <- unique(logjam_unique$Site_Year)
+
+# 6. Initialize map
+logjam_map <- leaflet() %>%
+  addTiles(group = "OpenStreetMap") %>%
+  addProviderTiles("Esri.WorldImagery", group = "World Imagery")
+
+# 7. Add data for each Site-Year
+for (group in site_year_groups) {
+  site_year_data <- logjam_unique %>% filter(Site_Year == group)
+  site_reach_data <- reach_points %>% filter(Site_Year == group)
+
+  logjam_map <- logjam_map %>%
+    addCircleMarkers(
+      data = site_year_data,
+      lat = ~Latitude,
+      lng = ~Longitude,
+      group = group,
+      radius = ~Scaled_Radius,
+      fillColor = ~year_palette(year),
+      fillOpacity = 0.8,
+      stroke = FALSE,
+      popup = ~paste("Site: ", Site,
+                     "<br>Year: ", year,
+                     "<br>Logjam ID: ", Jam_ID,
+                     "<br>Area: ", round(Area_m2, 1), " m²")
+    ) %>%
+     addLabelOnlyMarkers(
+    data = site_reach_data,
+    lat = ~Start_Latitude,
+    lng = ~Start_Longitude,
+    label = "X",
+    labelOptions = labelOptions(noHide = TRUE, direction = "center", textOnly = TRUE, style = list("color" = "#FF00FF","font-size" = "20px", "font-weight"="bold")),
+    group = paste(group, "Reach Start")
+  ) %>%
+  addLabelOnlyMarkers(
+    data = site_reach_data,
+    lat = ~End_Latitude,
+    lng = ~End_Longitude,
+    label = "X",
+    labelOptions = labelOptions(noHide = TRUE, direction = "center", textOnly = TRUE, style = list("color" = "#FF00FF","font-size" = "20px", "font-weight"="bold")),
+    group = paste(group, "Reach End")
+  )
+}
+
+# 8. Finalize map
+logjam_map <- logjam_map %>%
+  addLayersControl(
+    overlayGroups = site_year_groups,
+    baseGroups = c("OpenStreetMap", "World Imagery"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = year_palette,
+    values = logjam_unique$year,
+    title = "Survey Year",
+    opacity = 1
+  )
+
+# 9. Display map
+logjam_map
+```
+
+
+
+## Logjam Metrics
+
+Now we generate some simple but useful reach-scale metrics using the logjam survey data. These metrics are useful for comparing between before or after your restoration action and with reference to a control, and may also be comparable to benchmark values established in similar systems.
+
+You may need to scroll to see all of the metrics that are displayed in the below table. This table is also exported to your output folder.
+
+```{r summary logjam table, echo=FALSE, message=FALSE} 
+
+
+# Summarize LWD data to get Total LWD per site/year
+total_lwd_data <- lwd_data %>%
+  group_by(Site, year) %>%
+  summarise(
+    Reach_LWD_Nr = sum(Length_m > 0, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# define 'year' as a factor
+total_lwd_data$year<-as.factor(total_lwd_data$year)
+logjam_data$year<- as.factor(logjam_data$year)
+
+# Merge Total_LWD into logjam_data 
+logjam_data <- logjam_data %>%
+  left_join(total_lwd_data, by = c("Site", "year"))
+
+#create summary metric table
+summary_table_jam <- logjam_data %>%
+  group_by(Site,year) %>%
+  summarise(
+    #Total Number of jams
+    Total_Jams = ifelse(all(is.na(Jam_ID)), 0, n()), # If Jam_ID for a site and date is NA, it will assign a zero for 'Total_jams', otherwise it will return the number of rows 'n()' for that group 
+    #Frequency of jams (number of jams per 100 m stream length)
+    Frequency_Jams = n() / first(Reach_Length) * 100,
+    #Average number of pieces per jam 
+    Avg_Piece_Jam = sprintf("%.2f (%.2f)", mean(LWD_No., na.rm = TRUE), sd(LWD_No., na.rm = TRUE)),
+    #Average Height (m), na.rm = TRUE tells the function to remove any NA values in the data before performing the operation
+    Avg_Height_m = sprintf("%.2f (%.2f)", mean(Height_m, na.rm = TRUE), sd(Height_m, na.rm = TRUE)),
+    #Average Length (m)
+    Avg_Length_m = sprintf("%.2f (%.2f)", mean(Length_m, na.rm = TRUE), sd(Length_m, na.rm = TRUE)),
+    #Average Width (m)
+    Avg_Width_m = sprintf("%.2f (%.2f)", mean(Width_m, na.rm = TRUE), sd(Width_m, na.rm = TRUE)),
+    # Average logjam Area 
+    Avg_Area = sprintf("%.2f (%.2f)", mean(logjam_Area, na.rm = TRUE), sd(logjam_Area, na.rm = TRUE)),
+    # logjam Area per 100 m stream length
+    Area_per_100m = sum(logjam_Area, na.rm = TRUE)/ first(Reach_Length) * 100,
+    # Number of LWD Pieces in Reach within Logjams
+    LWD_Nr_Logjam  = sum(LWD_No., na.rm = TRUE),
+    # Number of LWD Pieces in Reach outside of Logjams
+    LWD_Nr_Free = first(Reach_LWD_Nr),
+    # Proportion of LWD aggregated in logjams
+    Prop_LWD_Aggregated = sum(LWD_No., na.rm = TRUE) / (sum(LWD_No., na.rm = TRUE) + first(Reach_LWD_Nr))*100, 
+  
+    # Count occurrences of each jam classification
+    Underflow_Jams = sum(Type == "Underflow", na.rm = TRUE),
+    Dam_Jams = sum(Type == "Dam", na.rm = TRUE),
+    Deflector_Jams = sum(Type == "Deflector", na.rm = TRUE),
+    Parallel_Jams = sum(Type == "Parallel", na.rm = TRUE)
+  )
+  
+
+logjam_table<-tags$div(
+  tags$h3("Logjam Reach-Scale Metrics"), 
+  reactable(summary_table_jam,searchable=TRUE, bordered=TRUE, highlight=TRUE,columns = list(
+    Site = colDef(name = "Site"),
+    year = colDef(name = "Year"),
+    Total_Jams = colDef(name = "Number of Logjams in Reach"),
+    Frequency_Jams = colDef(name = "Frequency of Logjams per 100 m)", 
+                           format = colFormat(digits = 1)),
+    Avg_Piece_Jam = colDef(name = "Mean Number of LWD Pieces per Logjam (SD)", 
+                           format = colFormat(digits = 1)),
+    Avg_Height_m = colDef(name = "Mean Logjam Height (SD) / m", 
+                           format = colFormat(digits = 1)),
+    Avg_Length_m = colDef(name = "Mean Logjam Length (SD) / m", 
+                           format = colFormat(digits = 1)),
+    Avg_Width_m = colDef(name = "Mean Logjam Width (SD) / m", 
+                           format = colFormat(digits = 1)),
+    Avg_Area = colDef(name = "Mean Logjam Area* (SD) / m²", 
+                           format = colFormat(digits = 1)),
+    Area_per_100m = colDef(name = "Area  (m²) of Logjam per 100 m Stream Length*",
+                           format = colFormat(digits = 1)),
+    LWD_Nr_Logjam = colDef(name = "Reach LWD Number, within Logjams",
+                           format = colFormat(digits = 1)),
+    LWD_Nr_Free = colDef(name = "Reach LWD Number, outside of Logjams",
+                           format = colFormat(digits = 1)),
+    Prop_LWD_Aggregated = colDef(name = "Proportion of LWD Pieces aggregated in Logjams (%)",
+                           format = colFormat(digits = 1)),
+    Underflow_Jams = colDef(name = "Underflow Jams"),
+      Dam_Jams = colDef(name = "Dam Jams"),
+      Deflector_Jams = colDef(name = "Deflector Jams"),
+      Parallel_Jams = colDef(name = "Parallel Jams")),
+    columnGroups = list(
+      colGroup(
+        name = "Logjam Classification (number of occurrences)", # this code creates a grouped header for the logjam types
+        columns = c("Underflow_Jams", "Dam_Jams", "Deflector_Jams", "Parallel_Jams")))))
+
+logjam_table
+
+# export the table
+export_table(as.data.frame(summary_table_jam), "Logjam_ReachScale_Metrics.csv")
+   
+```
+
+__* Note__, area metrics are derived from logjam 'footprint' areas estimated using the length and width values. These provide the maximum footprint of the streambed occupied by each logjam, which in most cases will encompass parts of the streambed unoccupied by wood. As such, area estimates may not directly reflect the actual hydraulic impact or cover value of each logjam. For instance, large-area logjams with a high proportion of free spaces (i.e,. LWD pieces loosely in contact) may have less influence on flow / or provide less cover than smaller area, but more dense logjams.
+
+# continue here. improve clarity, add extra before and after years test data, explain interpretation for final figure.
+
+__A note on the logjam survey methodology:__
+
+Within the scientific literature, logjam volume is often calculated by taking length and diameter measurements of LWD pieces within the jam and calculating total logjam volume by adding together the volume of those individual pieces (Livers et al. 2020). This approach can be time-consuming and may pose a safety risk to the field team as they navigate in and around logjams. An alternative approach requires field crews to measure the dimensions (best-fit-box) of the jam and visually estimate porosity (sometimes referred to as a wood-to-air ratio). This approach, while quicker, is relatively subjective, making reproducibility of this method challenging (Livers et al. 2020).  
+
+Given the timeframes, limited resources, and variety of people involved in measurements for restoration projects, we opted to prioritise reproducability and logistical simplicity. *Our recommended approach for comparing the characteristics of the logjams among reaches and/or years is to refer to the mean number of pieces of LWD in logjams, the mean logjam area (footprint), and the frequency of logjams per 100 m*. Taken together, these metrics should permit a reasonably detailed understanding of how logjams change through time. 
+__Total Large Wood in the Reach__
+
+You may be interested in how much large wood moves into and out of your study reach, and/or how wood moves within the reach. Logjams are one component of large wood in the reach, and so we imported data from the LWD script so that we can better understand to what degree observed changes suggest movement within versus movement into and out of your reach. The table above includes the numbers of LWD pieces within logjams, outside of logjams, and the proportion of the total large wood in your reach found within logjams.
+
+We will plot the proportion of LWD that is found within logjams below, and export it to your output folder. You must consider this figure alongside the (non-logjam) LWD Volume figure from the LWD Data Analysis script, and the inferential test in that script. It could lead to avoidable errors if you interpret changes in non-logjam LWD volume without an understanding of whether LWD has been moving into or out of logjams. 
+
+```{r proportion plot, echo=FALSE} 
+
+
+# Calculate the proportions from logjam_data
+logjam_summary <- logjam_data %>%
+  group_by(Site, year) %>%
+  summarise(
+    Total_LWD_Aggregated = sum(LWD_No., na.rm = TRUE),  # Total aggregated in logjams
+    Total_LWD_Independent = first(Total_LWD_Piece),  # Total independent LWD
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Prop_LWD_Aggregated = Total_LWD_Aggregated / (Total_LWD_Aggregated + Total_LWD_Independent) * 100,
+    Prop_LWD_Independent = 100 - Prop_LWD_Aggregated
+  )
+
+# Transform to long format for stacked bar plot
+logjam_summary_long <- logjam_summary %>%
+  select(Site, year, Prop_LWD_Aggregated, Prop_LWD_Independent) %>%
+  filter(!(is.na(Prop_LWD_Aggregated) | is.na(Prop_LWD_Independent))) %>%
+  pivot_longer(cols = c(Prop_LWD_Aggregated, Prop_LWD_Independent), 
+               names_to = "LWD_Type", values_to = "Proportion")
+
+# Create the stacked bar plot
+Prop_LWD_In_Jams <- ggplot(logjam_summary_long, aes(x = factor(year), y = Proportion, fill = LWD_Type)) +
+  geom_bar(stat = "identity", position = "stack", alpha=0.6) +
+  facet_wrap(~ Site) +  # Facet by site
+ scale_fill_viridis_d(option = "viridis",
+                      labels = c("Aggregated in Jams", "Independent Pieces")) +
+  facet_rep_wrap(~ Site, scales = "free_y",labeller = label_wrap_gen(width = 15), repeat.tick.labels = T)+ # wraps long site names, repeats x-axis ticks for all faceted plots
+  labs(x = "Year", y = "Proportion (%)", fill = "LWD Type",
+       title = "Proportion of LWD Aggregated in Logjams") 
+
+Prop_LWD_In_Jams
+
+export_plot(Prop_LWD_In_Jams, "Prop_LWD_In_Jams.pdf")
+
+```
+
+### Total Large Wood (this title is repeating the above... reorganise)
+
+We felt that including logjam porosity (wood-to-air/water ratio) variability into a volume estimation would not be sufficiently repeatable, and that measuring every piece of LWD in a logjam would be prohibitively time-consuming in the field for many salmon watersheds. As such, we lack a measurement of volume that is comparable between the non-logjam LWD data and the logjam data. Instead, we opt to examine how the total frequency of large wood in the reach (individual pieces plus those in logjams) changes over time and between sites. While this does sacrifice some information (volume variaiblity among LWD pieces) it retains repeatability and objectivity, which take precedence when faced with the reality of different individuals taking measurements over the years. 
+
+Although we do not conduct inferential tests on volume, your understanding of how wood changed within your reach can be based on observations such as the following:
+
+- The frequency of total wood in the reach. E.g., did our restoration site gain/lose large wood at a different rate following our actions compared with the control?
+
+- Proportion of LWD aggregated in logjams. E.g., despite large wood frequency changing at similar rates at both control and restoration reaches, did large wood in our restoration reach move into/out of logjams differently?
+
+- Reach volume of individual LWD. E.g., although there was no notable change in the proportion of total wood in logjams in our restored reach, was there a change in LWD volume in our reach that was different from the control? 
+
+There are numerous potential interpretations possible with different combinations of answers to the above (and other) questions that might be answered using these metrics. As always, it is best to refer to your *a priori* hypotheses and predictions, and to consult with other knowledgeable folks about what the results mean for your reach and your project. 
+
+While admittedly requiring a bit more head-scratching, we think that the above is the most appropriate and informative approach to gain understanding of the various nuances involved, within the logistical constraints of the typical restoration resources available. As such, we do not provide the tempting metric of 'total reach wood volume' by projecting mean LWD volume onto the frequencies of wood in the logjams. To do so would be to assume that volume distributions of LWD pieces in a logjam would be the same as for those outside of logjams. We suspect that this is untrue, but our field protocol still collected sufficient data to permit calculation of this metric should you feel otherwise. But bear in mind, even with this approach, you would not have individual-level data necessary for an inferential test.
+
+Here we provide plots that can be used to examine the total frequency of large wood within your reaches (logjam plus independent LWD pieces) over time.
+
+### Visualisation
+
+#### Before / After Years
+
+Enter in the below code the years that you consider 'before' and 'after' your restoration action. Ideally these should balance (equal number of years before as after), but they need not be consecutive years. The purpose of this categorisation is so that, if you have multiple years of data before and after your restoration actions, we can visually compare the slopes of the lines that fit within each category. This is to say, we can see if the rate of change of large wood frequency differs since the restoration action, which might help tease apart effects of your restoration from background effects (especially since we do not have suitable data for inferential testing). Note that if you do not have 2 or more years in each before and after category, a line will be fit across all the years together.
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+ 
+```{r total large wood visualisation, echo = FALSE}
+# COMPUTE TOTAL LWD PER REACH
+df <- summary_table_jam %>%
+  mutate(
+    Total_Reach_LWD = LWD_Nr_Logjam + LWD_Nr_Free,
+    year = as.numeric(year)   # ensure continuous scale
+  )
+
+#3. CHECK WHETHER TO SPLIT INTO BEFORE/AFTER SEGMENTS
+do_piecewise <- length(before_years) >= 2 && length(after_years) >= 2
+
+if (do_piecewise) {
+  # PIECEWISE: Tag each row as Before or After
+  df <- df %>%
+    mutate(
+      Period     = case_when(
+        year %in% before_years ~ "Before",
+        year %in% after_years  ~ "After",
+        TRUE                   ~ NA_character_
+      ),
+      SitePeriod = paste(Site, Period, sep = "_")
+    )
+  
+  # PLOT: Separate dashed/solid lines by Period
+ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site)) +
+    geom_point(size = 3) +
+    geom_line(aes(group = SitePeriod, linetype = Period), linewidth = 1) +
+    scale_linetype_manual(values = c("Before" = "dashed", "After" = "solid")) +
+    scale_x_continuous(breaks = sort(unique(df$year))) +
+    labs(
+      x        = "Year",
+      y        = "Total LWD Count per Reach",
+      color    = "Site",
+      linetype = "Period",
+      title    = "Piecewise LWD Trajectories: Before vs After"
+    ) +
+    theme_minimal(base_size = 14)
+
+} else {
+  # SIMPLE: One line per Site across all years
+ ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site, group = Site)) +
+    geom_point(size = 3) +
+    geom_line(linewidth = 1) +
+    scale_x_continuous(breaks = sort(unique(df$year))) +
+    labs(
+      x     = "Year",
+      y     = "Total LWD Count per Reach",
+      color = "Site",
+      title = "LWD Count by Site and Year"
+    ) +
+    theme_minimal(base_size = 14)
+}
+```
+
+
+# References
+
+Abbe T.B. and Montgomery D.R. (2003). Patterns and processes of wood debris accumulation in the Queets river basin, Washington. Geo- morphology 51: 81–107.
+
+Bilby R.E. and Likens G.E. (1980). Importance of organic debris dams in the structure and function of stream ecosystems. Ecology 61: 1107–1113.
+
+Livers, B., Lininger, K. B., Kramer, N., & Sendrowski, A. (2020). Porosity problems: Comparing and reviewing methods for estimating porosity and volume of wood jams in the field. Earth Surface Processes and Landforms ‘Wood in Rivers’ Special Issue, 45, 3336–3353. https://doi.org/10.1002/esp.4969
+
+O’Connor J.E., Jones M.A., Haluska T.L. (2003). Flood plain and channel dynamics of the Quinault and Queets Rivers, Washington, USA. Geomorphology 51: 31–59.
+
+Wallerstein N.P. and Thorne C.R. (2004). Influence of large Woody debris on morphological evolution of incised, sand-bed channels. Geomorphology 57: 53–73.
+
+Wohl E. and Goode J.R. (2008). Wood dynamics in headwater streams of the Colorado Rocky Mountains. Water Resources Research 44: W09429.
+

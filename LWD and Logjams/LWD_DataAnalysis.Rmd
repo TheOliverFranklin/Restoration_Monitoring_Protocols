@@ -127,7 +127,7 @@ standardize_column_types <- function(df) {
     return(df)
 }
 ```
-*This document contains data wrangling (tidying) and LWD analyses. We also have a separate script within this monitoring package which should be used if you encountered and recorded any logjams (see Logjam_DataAnalysis.rmd and Logjam_DataAnalysis.html). If you intend to run the logjam analyses, you must run this script first, as the logjam script uses metrics (and tidied data) from this one. We strongly recommend recording both LWD and logjams simultaneously to get a more complete understanding of wood in your reach.*_*
+*This document contains data wrangling (tidying) and LWD analyses. We also have a separate script within this monitoring package which should be used if you encountered and recorded any logjams (see Logjam_DataAnalysis.rmd and Logjam_DataAnalysis.html). If you intend to run the logjam analyses, you must run this script first, as the logjam script uses metrics (and tidied data) from this one. We strongly recommend recording both LWD and logjams simultaneously to get a more complete understanding of wood in your reach.*
 
 Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
 
@@ -155,7 +155,9 @@ If all of this looks daunting, don't worry. R is a very popular language and man
 
 Data wrangling, or cleaning and structuring the data, is the first step before analysis. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
 
-The first step is to combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+The first step is to combine all of the years and/or sites of LWD data that you wish to compare into one dataframe. Note that, if you also collected logjam data, that should be kept as separate files, as we will deal with that data in a separate script.
+
+These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
 
 ## Before importing data
 
@@ -310,7 +312,7 @@ if (interactive()) {
 }
 ```
 
-At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from these scripts. Some of the outputs (dataframes) may be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from the LWD and logjam scripts. Some of the outputs (dataframes) may be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
 
 We will now export the tidied dataframe so that it can be used in future analyses as needed. Check your file folder and the .csv files to see the data you exported before moving on.
 
