@@ -266,7 +266,7 @@ logjam_data<- df
 We also need to import the LWD dataframe that was generated from the Large Woody Debris (LWD) Data Analysis script. If you have specified the same output folder for both LWD and logjam files, this should happen automatically. If you used a different output folder for each, you should be prompted now to enter the location for the LWD dataframe. Note that if you have renamed the dataframe in your output folder, you will have to align the new name in the code that appears below in the .rmd document.
 
 
-``` {r LWD import, echo = FALSE}
+``` {r LWD import, echo = FALSE, message=FALSE}
 # Try to import LWD_dataframe.csv from output_folder
 lwd_file <- file.path(output_folder, "LWD_dataframe.csv")
 
@@ -297,7 +297,7 @@ if (file.exists(lwd_file)) {
 
 The objective of our logjam field survey procedure is to provide a repeatable methodology that can be used to monitor the abundance, characteristics and function of logjams in wadeable streams. Compared to individual pieces of LWD, logjams can have greater stability (Wohl and Goode, 2008) and exert more substantial geomorphic and ecological influences (Bilby and Likens, 1980; Abbe and Montgomery, 2003; O’Connor et al., 2003). When present, logjams are an important component of the total wood in a reach, and monitoring the spatial distribution and size of logjams can provide information regarding the dynamics of habitat formation. It may also be of value to pair these analyses with longitudinal surveys to detect the potential effects of this wood on stream morphology (e.g., residual pool depth, dammed pool frequency, presence of fine sediments).
 
-Before we dive into the analyses, let's briefly recall the survey methodology:
+Before we generate figures and metrics, let's briefly recall the survey methodology:
 
 Along each reach, logjams within the bankfull channel were identified and measured. For the purpose of this protocol, logjams were defined as collections of three or more pieces of LWD (i.e., ≥ 10 cm in diameter and ≥ 1 m long) that physically contact each other. The total number of pieces in the jam were tallied, dimensions were measured, and each jam was classified by type (based on a debris jam classification scheme developed by Wallerstein and Thorne 2004).  
 
@@ -305,9 +305,9 @@ Along each reach, logjams within the bankfull channel were identified and measur
 
 ## Logjam Map 
 
-Logjam locations are shown in the interactive map below, coloured by year and with symbol sizes indicative of relative logjam area (width x length as measured in field). You can toggle between basemaps and select the sites/survey year(s) of interest. Solid circular points (coloured according to survey year) indicate logjam locations and are labelled with site, year, Jam ID, and area (clicka a point to see its label). Magenta X symbols indicate the start and end points of the focal reach(es).
+Logjam locations are shown in the interactive map below, coloured by year and with symbol sizes indicative of relative logjam area (width x length as measured in field). You can toggle between basemaps and select the sites/survey year(s) of interest. Solid circular points (coloured according to survey year) indicate logjam locations and are labelled with site, year, Jam ID, and area (click a point to see its label). Magenta X symbols indicate the start and end points of the focal reach(es).
 
-Note that the circle size indicates relative area among logjams by using the square-roots of each area (to account for the potential large range in logjam sizes). The size of the circle does not indicate the actual size of the logjam on the map. Also bear in mind that the area calculation is based on a square that would contain the logjam's footprint - it does not mean that the full area is comprised of wood, nor does it contain any height information. But with this in mind, we feel that a simple visual representation on the map of both location and size can be very helpful in understanding how logjams move and change over time.
+Note that the circle symbol size indicates relative area among logjams by using the square-roots of each area (to account for the potential large range in logjam sizes). The size of the circle does not indicate the actual size of the logjam on the map. Also bear in mind that the area calculation is based on a rectangle that would contain the logjam's footprint - it does not mean that the full area is comprised of wood, nor does it contain any height information. But with this in mind, we feel that a simple visual representation on the map of both location and size can be very helpful in understanding how logjams move and change over time.
  
 ```{r logjam locations and sizes, echo = FALSE, warning = FALSE}
 # 1. Calculate Logjam Area
@@ -517,18 +517,17 @@ export_table(as.data.frame(summary_table_jam), "Logjam_ReachScale_Metrics.csv")
 
 __* Note__, area metrics are derived from logjam 'footprint' areas estimated using the length and width values. These provide the maximum footprint of the streambed occupied by each logjam, which in most cases will encompass parts of the streambed unoccupied by wood. As such, area estimates may not directly reflect the actual hydraulic impact or cover value of each logjam. For instance, large-area logjams with a high proportion of free spaces (i.e,. LWD pieces loosely in contact) may have less influence on flow / or provide less cover than smaller area, but more dense logjams.
 
-# continue here. improve clarity, add extra before and after years test data, explain interpretation for final figure.
+### Choice of Metrics
 
-__A note on the logjam survey methodology:__
+Within the scientific literature, logjam volume is often calculated by taking length and diameter measurements of LWD pieces within the jam and calculating total logjam volume by adding together the volume of those individual pieces (Livers et al. 2020). This approach can be time-consuming and may pose a safety risk to the field team as they navigate in and around logjams. Another alternative approach requires field crews to measure the dimensions (best-fit-box) of the jam and visually estimate porosity (sometimes referred to as a wood-to-air ratio). This approach, while quicker, is relatively subjective, making reproducibility of this method challenging (Livers et al. 2020).  
 
-Within the scientific literature, logjam volume is often calculated by taking length and diameter measurements of LWD pieces within the jam and calculating total logjam volume by adding together the volume of those individual pieces (Livers et al. 2020). This approach can be time-consuming and may pose a safety risk to the field team as they navigate in and around logjams. An alternative approach requires field crews to measure the dimensions (best-fit-box) of the jam and visually estimate porosity (sometimes referred to as a wood-to-air ratio). This approach, while quicker, is relatively subjective, making reproducibility of this method challenging (Livers et al. 2020).  
+Given the timeframes, limited resources, and variety of people involved in measurements for restoration projects, we opted to prioritise reproducability and logistical simplicity. *Our recommended approach for comparing the characteristics of the logjams among reaches and/or years is to refer to the **mean number of pieces of LWD in logjams, the mean logjam area (footprint), and the frequency of logjams per 100 m***. Taken together, these metrics should permit a reasonably detailed understanding of how logjams change through time. 
 
-Given the timeframes, limited resources, and variety of people involved in measurements for restoration projects, we opted to prioritise reproducability and logistical simplicity. *Our recommended approach for comparing the characteristics of the logjams among reaches and/or years is to refer to the mean number of pieces of LWD in logjams, the mean logjam area (footprint), and the frequency of logjams per 100 m*. Taken together, these metrics should permit a reasonably detailed understanding of how logjams change through time. 
-__Total Large Wood in the Reach__
+### Total Large Wood in the Reach
 
-You may be interested in how much large wood moves into and out of your study reach, and/or how wood moves within the reach. Logjams are one component of large wood in the reach, and so we imported data from the LWD script so that we can better understand to what degree observed changes suggest movement within versus movement into and out of your reach. The table above includes the numbers of LWD pieces within logjams, outside of logjams, and the proportion of the total large wood in your reach found within logjams.
+You are probably interested in how much large wood moves into and out of your study reach, and/or how wood moves within the reach. Logjams are one component of large wood in the reach, and we imported data from the LWD script so that we can better understand to what degree observed changes suggest movement within versus movement into and out of your reach. The table above includes the numbers of LWD pieces within logjams, outside of logjams, and the proportion of the total large wood in your reach found within logjams.
 
-We will plot the proportion of LWD that is found within logjams below, and export it to your output folder. You must consider this figure alongside the (non-logjam) LWD Volume figure from the LWD Data Analysis script, and the inferential test in that script. It could lead to avoidable errors if you interpret changes in non-logjam LWD volume without an understanding of whether LWD has been moving into or out of logjams. 
+Here we plot the proportion of LWD that is found within logjams, and export it to your output folder. 
 
 ```{r proportion plot, echo=FALSE} 
 
@@ -538,7 +537,7 @@ logjam_summary <- logjam_data %>%
   group_by(Site, year) %>%
   summarise(
     Total_LWD_Aggregated = sum(LWD_No., na.rm = TRUE),  # Total aggregated in logjams
-    Total_LWD_Independent = first(Total_LWD_Piece),  # Total independent LWD
+    Total_LWD_Independent = first(Reach_LWD_Nr),  # Total independent LWD
     .groups = "drop"
   ) %>%
   mutate(
@@ -569,11 +568,14 @@ export_plot(Prop_LWD_In_Jams, "Prop_LWD_In_Jams.pdf")
 
 ```
 
-### Total Large Wood (this title is repeating the above... reorganise)
 
-We felt that including logjam porosity (wood-to-air/water ratio) variability into a volume estimation would not be sufficiently repeatable, and that measuring every piece of LWD in a logjam would be prohibitively time-consuming in the field for many salmon watersheds. As such, we lack a measurement of volume that is comparable between the non-logjam LWD data and the logjam data. Instead, we opt to examine how the total frequency of large wood in the reach (individual pieces plus those in logjams) changes over time and between sites. While this does sacrifice some information (volume variaiblity among LWD pieces) it retains repeatability and objectivity, which take precedence when faced with the reality of different individuals taking measurements over the years. 
+Consider the above figure alongside the (non-logjam) LWD Volume figure from the LWD Data Analysis script, and the inferential test in that script. It could lead to avoidable errors if you interpret changes in non-logjam LWD volume without an understanding of whether LWD has been moving into or out of logjams. Although considering non-logjam LWD volume alongside proportion of LWD in logjams is not as intuitive as comparing volume to volume, for logistical reasons we do not have comparable volume measurements from the logjam.
 
-Although we do not conduct inferential tests on volume, your understanding of how wood changed within your reach can be based on observations such as the following:
+__Interpretation of Total Large Wood__
+
+For restoration monitoring purposes, we felt that including logjam porosity (wood-to-air/water ratio) variability into volume estimates would not be sufficiently repeatable, and that measuring every piece of LWD in a logjam would be prohibitively time-consuming in the field for many salmon watersheds. As such, we lack a measurement of volume that is comparable between the non-logjam LWD data and the logjam data. Instead, we opt to examine how the total frequency of large wood in the reach (individual pieces plus those in logjams) changes over time and between sites. This retains repeatability and objectivity, which we feel should take precedence when faced with the reality of different individuals taking measurements over the years. 
+
+Your understanding of how wood changed within your reach should be based on an integrated interpretation of a number of metrics from these LWD and logjam analyses. For example, stemming from your hypotheses and predictions, your interpretation might be based on the following:
 
 - The frequency of total wood in the reach. E.g., did our restoration site gain/lose large wood at a different rate following our actions compared with the control?
 
@@ -583,31 +585,31 @@ Although we do not conduct inferential tests on volume, your understanding of ho
 
 There are numerous potential interpretations possible with different combinations of answers to the above (and other) questions that might be answered using these metrics. As always, it is best to refer to your *a priori* hypotheses and predictions, and to consult with other knowledgeable folks about what the results mean for your reach and your project. 
 
-While admittedly requiring a bit more head-scratching, we think that the above is the most appropriate and informative approach to gain understanding of the various nuances involved, within the logistical constraints of the typical restoration resources available. As such, we do not provide the tempting metric of 'total reach wood volume' by projecting mean LWD volume onto the frequencies of wood in the logjams. To do so would be to assume that volume distributions of LWD pieces in a logjam would be the same as for those outside of logjams. We suspect that this is untrue, but our field protocol still collected sufficient data to permit calculation of this metric should you feel otherwise. But bear in mind, even with this approach, you would not have individual-level data necessary for an inferential test.
+Note that we do not provide the tempting metric of 'total reach wood volume' by projecting mean LWD volume onto the frequencies of wood in the logjams. To do so would be to assume that volume distributions of LWD pieces in a logjam would be the same as for those outside of logjams. We suspect that this is untrue, but our field protocol still collected sufficient data to permit calculation of this metric should you feel otherwise. But bear in mind, even with this approach, you would not have individual-level data necessary for most inferential tests.
 
-Here we provide plots that can be used to examine the total frequency of large wood within your reaches (logjam plus independent LWD pieces) over time.
+#### Total Large Wood Visualisation
 
-### Visualisation
+Here we provide a figure that can be used to examine how the total frequency of large wood (logjam plus independent LWD pieces) within your restored reach changes over time and with reference to a control site. You may note the absence of an inferential test in this script, which would require individual data on every piece of LWD in the logjams. Instead, we can use this figure to address the same types of question: Are the observed changes in large wood at your restored reach attributable to your actions? In our html document, we present four years of fabricated data at a restoration and control site as an example. You can still generate a figure with fewer years of data, but note that it will not be possible to compare *rates* of change between before versus after your restoration action.
 
-#### Before / After Years
+**Before / After Years**
 
-Enter in the below code the years that you consider 'before' and 'after' your restoration action. Ideally these should balance (equal number of years before as after), but they need not be consecutive years. The purpose of this categorisation is so that, if you have multiple years of data before and after your restoration actions, we can visually compare the slopes of the lines that fit within each category. This is to say, we can see if the rate of change of large wood frequency differs since the restoration action, which might help tease apart effects of your restoration from background effects (especially since we do not have suitable data for inferential testing). Note that if you do not have 2 or more years in each before and after category, a line will be fit across all the years together.
+Enter in the below code the years that you consider 'before' and 'after' your restoration action. Ideally these should balance (equal number of years before as after), and span similar timeframes. The purpose of this categorisation is so that, if you have multiple years of data before and after your restoration actions, we can visually compare the slopes of the lines that fit within each time category. This is to say, we can see if the rate of change of large wood frequency differs since the restoration action, which might help tease apart effects of your restoration from background effects. Note that if you do not have 2 or more years in each before and after category, a line will be fit across all the years together.
 
 ```{r define before after}
 # Define "Before" and "After" years
-before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
-after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+before_years <- c(2023,2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025,2026) #add more years inside brackets if needed, e.g. 'c(2027, 2028, 2029)'
 ```
  
-```{r total large wood visualisation, echo = FALSE}
+```{r total large wood visualisation, echo = FALSE, message=FALSE}
 # COMPUTE TOTAL LWD PER REACH
 df <- summary_table_jam %>%
   mutate(
     Total_Reach_LWD = LWD_Nr_Logjam + LWD_Nr_Free,
-    year = as.numeric(year)   # ensure continuous scale
+    year            = as.numeric(as.character(year))   # ensure continuous scale
   )
 
-#3. CHECK WHETHER TO SPLIT INTO BEFORE/AFTER SEGMENTS
+# CHECK WHETHER TO SPLIT INTO BEFORE/AFTER SEGMENTS
 do_piecewise <- length(before_years) >= 2 && length(after_years) >= 2
 
 if (do_piecewise) {
@@ -622,27 +624,44 @@ if (do_piecewise) {
       SitePeriod = paste(Site, Period, sep = "_")
     )
   
-  # PLOT: Separate dashed/solid lines by Period
-ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site)) +
-    geom_point(size = 3) +
-    geom_line(aes(group = SitePeriod, linetype = Period), linewidth = 1) +
-    scale_linetype_manual(values = c("Before" = "dashed", "After" = "solid")) +
-    scale_x_continuous(breaks = sort(unique(df$year))) +
-    labs(
-      x        = "Year",
-      y        = "Total LWD Count per Reach",
-      color    = "Site",
-      linetype = "Period",
-      title    = "Piecewise LWD Trajectories: Before vs After"
-    ) +
-    theme_minimal(base_size = 14)
+  # PLOT: Separate dashed/solid lines by Period, using simple linear regression to fit line
+Total_Wood_Plot<-ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site)) +
+  geom_point(size = 3) +
+  # dashed regression for Before
+  geom_smooth(
+    data = df %>% filter(Period == "Before"),
+    aes(group = Site), 
+    method = "lm", 
+    se = FALSE, 
+    linetype = "dashed"
+  ) +
+  # solid regression for After
+  geom_smooth(
+    data = df %>% filter(Period == "After"),
+    aes(group = Site), 
+    method = "lm", 
+    se = FALSE, 
+    linetype = "solid"
+  ) +
+  scale_x_continuous(breaks = sort(unique(df$year))) +
+    scale_color_viridis_d(option = "D") +
+  labs(
+    x        = "Year",
+    y        = "Total LWD 
+    (logjam + individual pieces)",
+    color    = "Site",
+    linetype = "Period",
+    title    = "Total Large Wood Count: Before vs After Restoration"
+  ) +
+  theme_minimal(base_size = 14)
 
 } else {
   # SIMPLE: One line per Site across all years
- ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site, group = Site)) +
+Total_Wood_Plot<-ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site, group = Site)) +
     geom_point(size = 3) +
     geom_line(linewidth = 1) +
     scale_x_continuous(breaks = sort(unique(df$year))) +
+    scale_color_viridis_d(option = "D") +
     labs(
       x     = "Year",
       y     = "Total LWD Count per Reach",
@@ -651,8 +670,22 @@ ggplot(df, aes(x = year, y = Total_Reach_LWD, color = Site)) +
     ) +
     theme_minimal(base_size = 14)
 }
+
+Total_Wood_Plot
+
+export_plot(Total_Wood_Plot, "Total_Wood_Plot.pdf")
 ```
 
+In our html document, the figure above shows slopes for the 'before' and 'after' restoration periods, and these are separated by colour for each site. This figure allows us to examine how our restoration action (occurring at the gap between lines from left to right) may have impacted the total LWD in our reach - both absolutely and in terms of its rate of change - in the context of observed changes at the control/reference reach. 
+
+Our figure suggests that our restoration action is associated with immediate recruitment of a lot of large wood (lines are at different elevations). But while the slope of the 'after' line does appear marginally steeper, there appears to have been an underlying 'background' increasing rate of recruitment. In contrast, our reference site is experiencing a decline in large wood that appears (as one would hope) unaltered by our restoration action. Out of context, we cannot say whether this is a successful result, but some thoughts come to mind:
+
+- We may have missed some important difference between our restoration and control reaches. They are trending in opposite directions before our restoration actions.
+- Was our restoration action a good use of resources? It resulted in an absolute increase in wood, but wood was already increasing.
+- Perhaps we actually placed all that extra wood, and would interpret not only the retention of the placed wood, but the continued recruitment as a wonderful success.
+- Should we be taking action at our control/reference reach now? Or should we first collect more years of data using this simple and easy protocol?
+
+These questions serve to illustrate that, while we provide a shortcut to help with collecting monitoring data, data processing, and generation of metrics and figures, the real challenging job of interpretation is over to you.
 
 # References
 
