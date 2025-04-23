@@ -24,7 +24,7 @@ This folder contains the Large Woody Debris (LWD) and Logjam Package. The files,
 
 - 2 html files: step by step guidance for data analysis. Use the LWD file first, and then the logjam file after (if you recorded any logjams). Contains some (partially fabricated) example data
 
-- 2 rmd file2: corresponding to the above html files, these contain the R code and guidance. To be used alongside the htmls to analyse the data you collected. Use the LWD file first, and then the logjam file after (if you recorded any logjams)
+- 2 rmd files: corresponding to the above html files, these contain the R code and guidance. To be used alongside the htmls to analyse the data you collected. Use the LWD file first, and then the logjam file after (if you recorded any logjams)
 
 
 
