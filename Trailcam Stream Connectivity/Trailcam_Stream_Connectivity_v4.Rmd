@@ -1,0 +1,717 @@
+---
+title: "Trailcam Stream Connectivity"
+author: "Nicci Zargarpour & Oliver Franklin"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    theme: spacelab
+    code_download: true 
+
+---
+
+```{r initial setup, include=FALSE}
+# Load required libraries and install any missing ones. This code loads the package to the work area and, if it is not installed, installs it.
+knitr::opts_chunk$set(echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(rmarkdown, ggplot2,lubridate, dplyr, stringr, tidyr, purrr, reactable, knitr, htmltools, tmap, sf,leaflet,kableExtra, DT, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Plot_Title.pdf")
+# export_plot(plotly_plot, "Plot_Title.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+```
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site                  = "character",
+    Date                  = "character",
+    Obs                   = "numeric"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+    return(df)
+}
+```
+
+
+# Guidance Format
+
+We have written this script in R markdown (.rmd file) and printed it as an .html document. As **Step 1** we recommend that you read through the .html file, which we printed using some example data (sourced from Bellucci et al. 2020). The .html file contains all the written guidance, but omits most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summary tables etc.) will be displayed. 
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+
+
+# Overview
+
+This script analyses trailcam-derived quantitative data associated with two aspects of stream connectivity: 
+
+- The hydrological connections among pools and riffles along a longitudinal continuum within a channel; and 
+- The hydrological connections across nodes (confluences, bifurcations) that link stream channels with tributaries, subordinate channels, or off-channel features (ponds, oxbows, etc.). 
+
+This script is adapted from Bellucci et al. 2020, in which they developed and tested a methodology that assesses stream connectivity using trail cameras. Their approach involves the following:
+
+1. Assigning stream connectivity categories (see Table 1, below) to hourly trail camera images
+2. Calculating average daily stream connectivity estimates. 
+3. Generating summary metrics using the daily estimates. The metrics are used to examine the temporal extents of stream connectivity across the monitoring period (Table 3). 
+
+Their methodology provides a cost-effective monitoring tool to characterize stream connectivity during critical rearing and growth bioperiods for fish, and during periods of environmental stress. While this approach is not a substitute for measuring streamflow directly, it can provide meaningful localised information on stream connectivity where information from streamflow gauges is limited or absent. 
+
+We adapted their approach for the context of monitoring restoration projects. This involved including an inferential test, which can allow statistical comparisons of (e.g.) a restored reach and a control or reference reach, with the intention that users can attribute observed change to their restoration actions when using a BACI (before-after-control-impact) study design. We have also include a parallel categorical rating system for application at nodes (confluences or bifurcations with off-channel or side-channel habitats).
+
+We have built on the metric calculations, example data, and R source code from Bellucci et al. 2020, available [here](https://github.com/marybecker/streamconnectivitymetrics). 
+
+### Hydrometric Tools
+
+You are probably using this approach because your focal system does not have established flow data, or the available data is not localised to your particular reach or focal feature. However, it may be very useful for planning deployment of the trailcam, and for interpreting the metrics generated below, to reference the nearest available hydrographs. For this, we recommend using the following:
+
+**hydrographR**: An R package designed to generate hydrographs using Water Survey of Canada data. Unlike other hydrograph tools, it allows users to select a specific year's trace and compare it to historical values. This feature enables the rapid identification of unusual hydrologic patterns and helps produce quick hydrologic backgrounds for preliminary desktop reviews of an area.
+
+**StreamTrackR**: An R tool for managing and analyzing stream monitoring data, helping users track sites, access up to date hydrometric information, and analyze trends. It generates summary reports of current streamflow conditions at selected stations, outputting the results in a tidy HTML format. An example report from December 2024 is attached.
+
+Both tools are available on GitHub here [hydroGraphR](https://github.com/pausoto7/hydroGraphR.git) and here [StreamTrackR](https://github.com/pausoto7/StreamTrackR.git).
+
+
+
+# Stream Connectivity Categorisation
+
+Table 1 presents the six stream connectivity categories developed by Bellucci et al. 2020 to relate flow and habitat availability to biological processes in streams, for trailcam images collected at riffle-pool sequences. Beneath this, in Table 2, are the corresponding categories that we propose to use for images collected at nodes.
+
+ 
+```{r Table 1, echo=FALSE}
+
+cats.table <- data.frame(
+  Category = c("1","2","3","4","5","6"),
+  Description = c("No water. Dry streambed","Some pools of standing water, but no flow. Riffles and pools entirely disconnected","Minimal flow. Some pools and riffles disconnected. Some habitat types not accessible to organisms","Flows with well-connected pools and riffles. All habitat types accessible to organisms, though flow does not have to be connected through entire bankfull width","Flow fills stream channel at or just below bankfull discharge","Flows above bankfull discharge and into floodplain"),
+  Connectivity = c("Disconnected","Disconnected","Disconnected","Connected","Connected","Connected"),
+  Significance = c("Mortality","Some life history functions reduced by limited access to all habitat. Mortality unless refugia are available. Potential higher mortality due to predation","Minimal flow supports some aquatic organisms, but prevents some life history functions of larger organisms due to limited access to all habitat types. Potential higher mortality due to predation","Flows available to support access to all habitat types to fulfill life history requirements for the aquatic community. Connected flows allows access to riffles for spawning and pools for rearing and growth", "Flows provide sediment transport and deposition and shape natural morphological channel design", "Flows that connect floodplain with river for nutrient and sediment exchange, and allows organisms to access floodplain habitat")
+)
+
+kable(cats.table, "html", caption = "Table 1: Stream Connectivity Categories at Riffle-Pool Sequences") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(2, width = "300px", extra_css = "word-wrap: break-word; white-space: normal;")
+
+
+```
+
+```{r Table 2, echo=FALSE}
+
+cats.table <- data.frame(
+  Category = c("1","2","3","4","5","6"),
+  Description = c("No water.  Entire area at or near the node is dry","Pools of standing water present at or near the node, but no continuous wetted surface connection between the main channel and the other habitat","Minimal flow (or continuous backwatered connection). Some surface flow is present at the node, or the node is backwatered, such that the habitats may be connected for some aquatic organisms, but likely too shallow for larger organisms to pass","Connected but not at or near bankfull discharge. Access through the node is not constrained for aquatic organisms","Flows at or just below bankfull discharge. Water velocity may become a barrier to passage through the node","Flows above bankfull discharge and overtop the banks at the node.  Water velocity may become a barrier to passage through the channel at the node, but alternate (floodplain) passage may be possible")
+)
+
+kable(cats.table, "html", caption = "Table 2: Stream Connectivity Categories at Nodes") %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(2, width = "300px", extra_css = "word-wrap: break-word; white-space: normal;")
+
+
+```
+
+
+You will notice that we do not include the connectivity or significance columns in Table 2. This is because, while riffle-pool sequences are relatively constrained in their morphology, nodes may be much more variable in their slope and the distance that may become disconnected. Furthermore, the biological significance at nodes will often pertain to passage through the node, which can be incredibly variable based on the species, life stage, bed material, slope, etc. While we do include reference to passage in the descriptions, we caution about making assumptions without knowledge applicable to your target organisms in your particular system.
+
+The effect of not assigning connected/disconnected labels on these categories is that your interpretation may be marginally more abstract, at least until you and your partners have determined at which ratings passage would be possible for your target organisms (e.g., categories 3 - 5, or 4 - 6, or only at category 4). We recommend explicitly making this determination of what constitutes passable / connected before you communicate your results more broadly.
+
+Now you are reminded of the process, we will get started.
+
+# Image Categorisation
+
+Before we can generate the metrics, you must assign a category to each hourly trailcam photo in which the stream is visible. 
+Before doing so, and especially if you have more than one person rating the images, you should spend some time calibrating yourselves. Review a set of random images from your site and practice assigning the most appropriate category. Keep track of the image reference and your rating, and check for discrepancies against a subsequent round of rating (or with another reader). Discuss potential discrepancies and reach a consensus before proceeding to the actual categorisation.
+
+When categorising the data, you should create a csv file with rows featuring the reference name for the reach/location (call this column *'Site'*), date (*'Date'*), and the rating for each image (column name *'Obs'*). It is not necessary to record a rating for every single hourly image (e.g., if there is insufficient light for a determination). This script will calculate the average daily rating from the hourly ratings that you enter.
+
+If your trailcam did not generate an index file with the timestamps for each photo, it may be possible to use the R package [exifr](https://www.npmjs.com/package/exifr) or a standalone tool like [exiftool](https://exiftool.org/) to extract this data and save time with file creation. 
+
+# Data Wrangling
+
+Data wrangling, or cleaning and structuring the data, is the next step before analysis. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+First we combine all of the rating data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe should contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years. Don't worry if you only have data from one site and one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Trailcam Stream Connectivity/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    !is.na(Obs),                       # Remove rows with NA in the Obs column (e.g. if rows entered with NA for unreadable)
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+# Data Preparation
+
+In the code chunk below, we prepare the data for analysis. You may need to edit the values in the code to suit your project. The steps are: 
+
+-  Convert the 'Date' column (character data) to date class. Depending on the formatting of your date, *you may need to adjust the code below to match your date format* (e.g., change the part that says 'dmy' to ydm, mdy, myd, dym, etc.)
+
+-  Extract the year and month from the date column 
+
+-  Extract the day of the year (DOY) from the date column (so that the date is expressed by one number)
+
+-  Filter the data to include only the range of interest. To do this, *adjust 'filter(Month %in% 7:10)' as necessary*. In this instance, we have filtered the data to only include months from July (7th month) through to October (10th month)
+
+-  Calculate the average daily stream connectivity category (new column called 'avg_Obs'), by averaging observations for each site and date 
+
+-  Create a binary column (called 'DurObs') to categorize average daily stream connectivity category as 'disconnected' / rating less than or equal to 3 (assigned '0') or 'connected' / rating more than 3 (assigned '1'). This column is useful in generating some of the metrics and in case you are following the connected/disconnected convention established by Bellucci et al 2020.
+  
+
+```{r data preparation}
+
+# Prepare data
+data <- df %>%
+  mutate(Date = dmy(Date),  # Convert 'Date' column to Date class
+         Year =year(Date),
+         Month = month(Date),  # 
+         DOY = yday(Date)) %>%  # 
+  filter(Month %in% 7:10) %>%  # Filter for months of interest
+  group_by(Site,Date, Year, Month, DOY) %>%  # 
+  summarize(avg_Obs = round(mean(Obs, na.rm = TRUE)),  # 
+            DurObs = ifelse(avg_Obs > 3, 1, 0),  # 
+            .groups = "drop")  # 
+
+```
+We can now take a look at the data, and check that everything looks as it should.
+
+```{r view data, echo = FALSE}
+# display the data
+
+datatable(
+  data,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+
+```
+
+
+
+# Export Tidied Dataframe
+
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/TrailcamStreamConnectivity"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. When prompted you will need to enter the folder location (e.g., C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. 
+
+We will now export the tidied dataframe to your specified folder for reference or subsequent analyses.
+
+```{r df export, echo = FALSE}
+export_table(as.data.frame(data),"StreamConnectivity_dataframe.csv")
+```
+
+Check your file folder and the .csv files to see the data you exported. 
+
+
+Let's begin the analyses!
+
+# Data Analyses
+
+## Optional: Site Location 
+
+If you would like to plot the locations of each of your sites on a map, at this point you should create a .csv file with columns for 'Site', 'Longitude', and 'Latitude'. Specify the location of this file in the code below:
+
+```{r import data, message=FALSE, warning=FALSE}
+# Load in Site location information, amend the path in the code below to link to your .csv of the location data
+site_file <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Trailcam Stream Connectivity/Sites.csv"
+```
+```{r check if file exists, echo=FALSE, message=FALSE, warning=FALSE}
+if (file.exists(site_file)) {
+  site_data <- read.csv(site_file, header = TRUE)
+} else {
+  site_data <- NULL  # Assign NULL if file does not exist
+}
+```
+```{r show study location,echo=FALSE, message=FALSE, warning=FALSE}
+
+if (!is.null(site_data)) {
+# Convert site data to sf object
+site_sf <- site_data %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) # WGS84 coordinate system
+
+# Extract coordinates for leaflet
+site_coords <- site_sf %>%
+  st_coordinates() %>% # Extract Longitude and Latitude
+  as.data.frame() %>% # Convert to a data frame
+  cbind(st_drop_geometry(site_sf)) # Combine coordinates with site data (i.e., Station_Name)
+
+
+# Create interactive map with leaflet 
+leaflet_map <- leaflet(data = site_coords) %>%
+  addProviderTiles("Esri.WorldImagery", group = "World Imagery") %>% # add basemap layers; will toggle between both
+  addProviderTiles("Esri.WorldTopoMap", group = "World TopoMap") %>% # add basemap layers; will toggle between both 
+  addCircleMarkers( # add circle markers for station locations
+    lng = ~X,  # Longitude column
+    lat = ~Y,  # Latitude column
+    radius = 5,  # Default marker radius
+    fillColor = "blue", # marker colour
+    fillOpacity = 1, # transparency of markers
+    stroke= F, # remove circle outline
+    popup = ~Site, # Site names will pop up when hovered over (interactive plot)
+  ) %>%
+  addLayersControl(
+    baseGroups = c("World TopoMap"," World Imagery"), # basemap toggle options 
+    options = layersControlOptions(collapsed = TRUE) # Keep layers control minimized, change to FALSE if you want to see the layer toggle options
+  ) %>%
+  # JavaScript to adjust marker size dynamically based on zoom level
+  htmlwidgets::onRender(
+    "function(el, x) {
+       var map = this;                                            // Reference the map object
+       map.on('zoomend', function() {                             // Event triggered when zoom changes
+         var zoom = map.getZoom();                                // Get current zoom level
+         map.eachLayer(function(layer) {                          // Iterate through all map layers
+           if (layer instanceof L.CircleMarker) {                 // Target circle markers only
+             var newRadius = zoom < 5 ? 10 : (zoom < 10 ? 6 : 4); // Adjust radius based on zoom level; zoom < 5: large markers (radius = 10), zoom 5-10:                                                                       // medium markers (radius = 6), zoom > 10: small markers (radius = 4)
+             layer.setRadius(newRadius);                          // Update marker size
+           }
+         });
+       });
+     }"
+  )
+
+leaflet_map
+}
+
+```
+ 
+## Calculating Metrics
+
+Bellucci et al. 2020 developed metrics to describe the magnitude, frequency, duration, and timing components of stream connectivity (Table 3) based on the average daily stream connectivity categories observed (Table 1). The metrics were developed to compare locations on the same stream (e.g., upstream and downstream of a stressor), or to compare a potentially impacted site to a least disturbed site. 
+We have adapted these slightly by removing the reference to the 'connected' or 'disconnected' dichotomy, which as mentioned above may not be as appropriate for node connectivity. Otherwise the metrics remain unchanged.
+
+
+```{r flow metrics description, echo=FALSE}
+
+# Create the table
+
+metrics.table<-data.frame(
+  Flow_Component = c("Duration","", "","","","","Frequency","","","","","","","Magnitude","","","","","","Timing",""),
+  Code = c("D1","D2","D3","D4","DL","DN","F1","F2","F3" ,"F4","FL","FN","FPL","MA","M50","M25","M75","MASept","M50Sept","T1","T2"),
+  Description = c("Mean duration of consecutive days in Category 1","Mean duration of consecutive days in Category 2","Mean duration of days in Category 3","Mean duration of days in Category 4","Mean duration of days in either Category 1, 2 or 3","Mean duration of days in either Category 4, 5 or 6","Number of days in Category 1","Number of days in Category 2","Number of days in Category 3","Number of days in Category 4","Number of days in either Category 1, 2 or 3","Number of days in either Category 4, 5 or 6","Percent of days in either Category 1, 2 or 3","Average flow category","Median flow category","25th percentile flow category","75th percentile flow category","Average September flow category","Median September flow category","Day of Year of first observation in either Category 1, 2 or 3","Day of Year of first observation in Category 1")
+)
+
+# Create and style the HTML table
+kable(metrics.table, "html", caption = "Table 3: Stream Connectivity Metrics", col.names=c("Flow Component","Code","Description")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  column_spec(3, width = "300px", extra_css = "word-wrap: break-word; white-space: normal;")
+
+#export table as needed
+export_table(as.data.frame(metrics.table), "metrics_legend.csv")
+
+```
+
+
+Table 4 below presents the numerical results for all of the above stream connectivity metrics based on the average daily stream connectivity categories in your data.
+
+
+
+```{r flow metrics, echo=FALSE}
+# Calculate Metrics
+
+calculate_metrics <- function(site_data) {
+  site_data <- site_data %>% arrange(DOY) # Ensure sorted
+  
+  # Magnitude Metrics
+  MA <- round(mean(site_data$avg_Obs, na.rm = TRUE),1)
+  M50 <- quantile(site_data$avg_Obs, 0.5, na.rm = TRUE)
+  M25 <- quantile(site_data$avg_Obs, 0.25, na.rm = TRUE)
+  M75 <- quantile(site_data$avg_Obs, 0.75, na.rm = TRUE)
+  MASept <- round(mean(site_data %>% filter(Month == 9) %>% pull(avg_Obs), na.rm = TRUE),1)
+  M50Sept <- quantile(site_data %>% filter(Month == 9) %>% pull(avg_Obs), 0.5, na.rm = TRUE)
+  
+  # Duration Metrics
+  calculate_duration <- function(column, value) {
+    round(mean(rle(site_data[[column]])$lengths[rle(site_data[[column]])$values == value], na.rm = TRUE),1)
+  }
+  D1 <- calculate_duration("avg_Obs", 1)
+  D2 <- calculate_duration("avg_Obs", 2)
+  D3 <- calculate_duration("avg_Obs", 3)
+  D4 <- calculate_duration("avg_Obs", 4)
+  DL <- calculate_duration("DurObs", 0)
+  DN <- calculate_duration("DurObs", 1)
+  
+  # Frequency Metrics
+  F1 <- sum(site_data$avg_Obs == 1, na.rm = TRUE)
+  F2 <- sum(site_data$avg_Obs == 2, na.rm = TRUE)
+  F3 <- sum(site_data$avg_Obs == 3, na.rm = TRUE)
+  F4 <- sum(site_data$avg_Obs == 4, na.rm = TRUE)
+  FL <- sum(site_data$avg_Obs < 4, na.rm = TRUE)
+  FN <- sum(site_data$avg_Obs > 3, na.rm = TRUE)
+  FPL<- round(FL/nrow(site_data)*100,0)
+  
+  
+  # Timing Metrics
+  T1 <- site_data %>%
+    filter(DurObs == 0) %>%
+    summarize(T1 = first(DOY)) %>%
+    pull(T1)
+  T2 <- site_data %>%
+    filter(avg_Obs == 1) %>%
+    summarize(T2 = first(DOY)) %>%
+    pull(T2)
+  
+  
+ # Combine metrics into a tibble
+  tibble(
+    Metric = c("MA", "M50", "M25", "M75", "MASept", "M50Sept", "D1", "D2", "D3", "D4", "DL", "DN", "F1", "F2", "F3", "F4", "FL", "FN", "FPL", "T1", "T2"),
+    Measure = c(
+      "Flow Category","Flow Category","Flow Category","Flow Category","Flow Category","Flow Category", "Days","Days","Days",
+      "Days","Days","Days","Days","Days","Days","Days","Days","Days","%","Day of Year","Day of Year"
+    ),
+    Value = c(MA, M50, M25, M75, MASept, M50Sept, D1, D2, D3, D4, DL, DN, F1, F2, F3, F4, FL, FN, FPL, T1, T2)
+  )
+}
+
+# Calculate metrics for all sites and reshape the data
+flow_metrics_df <- data %>%
+  group_by(Site) %>% 
+  nest() %>% 
+  mutate(metrics = map(data, calculate_metrics)) %>% 
+  unnest(metrics) %>% 
+  arrange(Site, Metric) %>% # arrange in alpha order
+  pivot_wider(
+    id_cols = c(Metric, Measure), 
+    names_from = Site, 
+    values_from = Value
+  ) 
+
+#export table as needed
+export_table(as.data.frame(flow_metrics_df), "flow_metrics.csv")
+
+
+# Create a reactable table (for display in Rmd.)
+
+flow_metrics_table <- reactable(
+  flow_metrics_df,
+  bordered = TRUE,
+  striped = TRUE,
+  highlight = TRUE,
+  pagination = FALSE,
+  defaultPageSize = 10,
+  theme = reactableTheme(
+    headerStyle = list(backgroundColor = "#f7f7f7", fontWeight = "bold")))
+
+# display table
+tags$div(
+  tags$h3("Table 4: Stream Connectivity Metrics Calculated from Trail Camera Images"),
+  flow_metrics_table
+)
+
+
+
+```
+
+## Data Visualization
+
+Here we present two figures that are useful in exploring changes at your restoration site and at the control site over time. The figures show the daily rating across time along the x axis (day of year).
+
+- The first figure includes the groupings of ratings that Bellucci et al (2020) used: Dry (rating = 1), Disconnnected (1 < rating $\leq$ 3), or Connected (3 < rating $\leq$ 6). This is useful where you want to highlight dry conditions, and/or where the dichotomy of 1 - 3 vs 4 - 6 is appropriate for your project.
+
+- The second figure shows the daily rating values without further categorisation and using a continuous colour scale. This figure de-emphasises differences among categories, and may be preferred if there is no clear connected/disconnected distinction for your project (e.g. if fish passage may be impeded at ratings 1, 2, and 6)
+
+Both figures are exported to your output folder.
+
+```{r Plot grouped ratings, echo=FALSE, warning=FALSE}
+# 1. Build the Site-Year lookup
+site_year_lookup <- data %>%
+  distinct(Site, Year) %>%       # every unique Site & Year
+  arrange(Site, Year) %>%        # order however you like
+  mutate(
+    N       = row_number(),  
+    label   = paste0("(", N, ") ", Site, " – ", Year)
+  )
+
+# 2. Join back into your main data
+plot_data <- data %>%
+  left_join(site_year_lookup, by = c("Site", "Year")) %>%
+  # recode DurObs into a factor with your categories
+  mutate(
+    DurObs = factor(
+      ifelse(avg_Obs == 1, "Rating 1 (Dry)",
+        ifelse(DurObs == 0, "Rating 2 to 3", "Rating 4 to 6")
+      ),
+      levels = c("Rating 1 (Dry)", "Rating 2 to 3", "Rating 4 to 6")
+    )
+  )
+
+# 3. Define your colours
+cols <- c(
+  "Rating 2 to 3" = "#b2abd2",
+  "Rating 4 to 6" = "#0571b0",
+  "Rating 1 (Dry)"          = "#ca0020"
+)
+
+# 4. Plot — no filtering, no faceting, all Site×Year on the y-axis
+fconnectdur_sy <- ggplot(plot_data, aes(x = DOY, y = N, colour = DurObs, group = interaction(Site, Year))) +
+  geom_line(linewidth = 8) +
+  scale_y_reverse(
+    breaks = site_year_lookup$N,
+    labels = site_year_lookup$label
+  ) +
+  scale_colour_manual(values = cols) +
+  labs(
+    x     = "Day of Year",
+    y     = "Site – Year",
+    colour = NULL,
+    title = "Stream Connectivity by Day of Year - Ratings Grouped"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_blank(),  # clean up horizontal grid lines
+    panel.grid.minor   = element_blank()
+  )
+
+fconnectdur_sy
+
+export_plot(fconnectdur_sy, "Connectivity_Grouped_Ratings.pdf")
+
+```
+
+```{r plot by daily obs, echo = FALSE}
+
+# Build the Site-Year lookup
+site_year_lookup <- data %>%
+  distinct(Site, Year) %>%
+  arrange(Site, Year) %>%
+  mutate(
+    N     = row_number(),
+    label = paste0("(", N, ") ", Site, " – ", Year)
+  )
+
+# Join back into main data
+plot_data <- data %>%
+  left_join(site_year_lookup, by = c("Site", "Year"))
+
+# Plot using avg_Obs with viridis
+dayratingsplot <- ggplot(plot_data, aes(x = DOY, y = N, colour = avg_Obs, group = interaction(Site, Year))) +
+  geom_line(linewidth = 8) +
+  scale_y_reverse(
+    breaks = site_year_lookup$N,
+    labels = site_year_lookup$label
+  ) +
+  scale_colour_viridis_c(option = "viridis", direction = -1, limits = c(1,6)) +
+  labs(
+    x      = "Day of Year",
+    y      = "Site – Year",
+    colour = "Avg Rating",
+    title  = "Stream Connectivity by Day of Year - Daily Ratings"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position        = "bottom",
+    panel.grid.major.y     = element_blank(),
+    panel.grid.minor       = element_blank()
+  )
+
+dayratingsplot
+
+export_plot(dayratingsplot, "Connectivity_Daily_Ratings.pdf")
+
+
+```
+
+The above figures can be very informative for interpreting distinct changes in flow. However, in many cases the interpretation can be challenging: even with well-matched reference sites, there can be underlying trends at a variety of timescales that may or may not be associated with your restoration action. To provide more assistance in understanding the data, below we provide an inferential test.
+
+# Inferential Test
+
+Many familiar statistical tests are unsuitable for data like streamflow because temporal autocorrelation (flow today being associated with flow yesterday and flow tomorrow) violates assumptions of independence among observations. Furthermore, we might anticipate non-normality in restoration site flow data: we are probably monitoring at a location and during a period featuring a relatively high frequency of extreme values. 
+
+Here we present a generalized linear model (glm), an inferential test that may overcome these difficulties. However, since the test and its interpretation may be less familiar, we urge caution in interpreting the results. It may be advisable to focus your interpretation on the changes in the metrics and the figures above, particularly if you are not comfortable with understanding the hypothesised linear model and interpreting the various values both independently and when taken together. Below we will provide the code for our generalized linear model, and some notes on interpretation.
+
+#### Before / After Years
+
+Consistent with the BACI study design, we consider your restoration action as a discrete event that (we hope) changes stream connectivity such that we can detect a difference between data from before and data from after the restoration action. 
+
+Enter in the below code the years that you consider 'before' and 'after' your restoration action. You may have more than one year in each category. It is important that the data from reference and restoration sites should be aligned temporally. 
+
+```{r define before after}
+# Define "Before" and "After" years
+before_years <- c(2023) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+```
+``` {r categorise years, echo=FALSE}
+# Categorize years
+data <- data %>%
+  mutate(Time_Category = case_when(
+    Year %in% before_years ~ "Before",
+    Year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
+```
+
+## Hypothesised Generalized Linear Model
+
+We refer to a hypothesised model because we aim to explain variation in the daily rating values by proposing that a set of explanatory variables have measurable effects. Essentially, we suggest that variation in these explanatory variables can account for the variation in our response variable, the daily rating. By referring to this as a hypothesis, we are acknowledging that it can be incomplete (other important variables are almost certainly missing) and/or incorrect.
+
+When selecting explanatory variables, in some cases we expect a causal effect — for example, we believe that the choice of site can have a causal effect on the rating, as our restoration efforts (that occurred at one site) will hopefully alter the rating. In other cases, explanatory variables are included to control for factors that are not directly attributable to the restoration efforts — such as seasonal changes in flow. These variables help isolate the effects of the restoration from broader influences on the rating.
+
+We wanted to clarify the hypothetical nature of our model because temporal variability in streamflow is complex. We know we cannot accurately predict it with a simple equation such as the one we propose below. Nonetheless, the model allows us to explore reasonable causal relationships and account for much of the background variability — such that our model might be able to reveal effects of our restoration effort that are not immediately obvious from figures or metrics.
+
+Our hypothesised model to explain variation in daily rating values is:
+
+$$
+\text{Rating} \sim \text{Site} \times \text{Time} \times \text{Day of Year}^2 + \text{Rating}_{t-1}
+$$
+The terms are as follows:
+
+- **Rating** is the response variable, the daily average of the ordinal connectivity ratings from 1 - 6
+- **Site** is a factor which typically has two levels: a control site and a restoration site
+- **Time** is a factor that we assigned two levels: before and after, defined relative to the restoration event
+- **Day of Year** models seasonal trends in flow and, by using a quadratic polynomial, allows for curved seasonal trends
+- **Rating(<sub>t-1</sub>)** is a lag term to account for autocorrelation, it uses the previous day's rating as an explanatory variable.
+
+We have included interactions among site, time, and day of year, primarily because we are interested in:
+
+- How the daily rating values may have changed differently between the control and reference sites since the restoration action (site * time), as well as
+- How the rate of change of the daily rating values through the season may have changed differently between the control and reference sites since the restoration action (site * time * day of year). 
+
+As an example of the difference between these two interactions: In the former we might detect an absolute increase in average daily ratings at our restoration site after the restoration that was not observed at our reference site; In the latter we might, despite perhaps the same average daily rating, see at our restoration site (and after restoration) that the daily ratings stay higher for longer before falling, and that this change was not evident at the reference site.
+
+Additional interaction terms can tell us whether there are potential background differences between the seasonal flow patterns between sites (site * day of year), or whether the seasonal flow patterns appear to have changed over the years, similarly at both sites (time * day of year).
+
+Interpretation of the model results requires consideration of these types of effects potentially happening concurrently, as well as recognition of the unexplained variability that is not captured by our simple hypothetical model, but that might also correlate with our explanatory variables.
+
+
+
+# here
+
+
+# to do:
+
+- inferential test
+- ensure exports are correct (all figs, and table with descrtiptiuonsof metric,s and metrics)
+
+
+
+
+# References
+
+Bellucci, C. J., Becker, M. E., Czarnowski, M., & Fitting, C. (2020). A novel method to evaluate stream connectivity using trail cameras. River Research and Applications, 36(8), 1504–1514. https://doi.org/10.1002/rra.3689
+

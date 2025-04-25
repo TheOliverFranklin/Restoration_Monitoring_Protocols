@@ -132,7 +132,7 @@ We have written these data analysis scripts in R markdown (.rmd files) and print
 
 - We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
 
-- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file.
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
 
 - You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
 
