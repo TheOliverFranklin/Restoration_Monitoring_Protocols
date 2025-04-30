@@ -11,10 +11,24 @@ output:
 
 ```{r initial setup, include=FALSE}
 # Load required libraries and install any missing ones. This code loads the package to the work area and, if it is not installed, installs it.
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  fig.width = 10,
+  fig.align = "center",
+  out.width = "100%"
+)
+
 if (!requireNamespace("pacman", quietly = TRUE)) {
-  install.packages("pacman")}
-pacman::p_load(rmarkdown, ggplot2,lubridate, dplyr, stringr, tidyr, purrr, reactable, knitr, htmltools, tmap, sf,leaflet,kableExtra, DT, MASS, car, DHARMa, glmmTMB, boot, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+  install.packages("pacman")
+}
+
+pacman::p_load(
+  rmarkdown, ggplot2, lubridate, dplyr, stringr, tidyr, purrr,
+  reactable, knitr, htmltools, tmap, sf, leaflet, kableExtra, DT,
+  MASS, car, glmmTMB,
+  update = FALSE # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+)
+
 ```
 
 ```{r export functions, echo = FALSE}
@@ -183,8 +197,9 @@ cats.table <- data.frame(
 )
 
 kable(cats.table, "html", caption = "Table 2: Stream Connectivity Categories at Nodes") %>%
-  kable_styling(bootstrap_options = c("striped", "hover")) %>%
-  column_spec(2, width = "300px", extra_css = "word-wrap: break-word; white-space: normal;")
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE) %>%
+  column_spec(1, width = "100px") %>%  # Narrower for Category
+  column_spec(2, width = "600px", extra_css = "word-wrap: break-word; white-space: normal;")
 
 
 ```
@@ -242,7 +257,7 @@ df <- csv_files %>%
 
 In the code chunk below, we prepare the data for analysis. You may need to edit the values in the code to suit your project. The steps are: 
 
--  Convert the 'Date' column (character data) to date class. Depending on the formatting of your date, *you may need to adjust the code below to match your date format* (e.g., change the part that says 'dmy' to ydm, mdy, myd, dym, etc.)
+-  Convert the 'Date' column (character data) to date class. Depending on the formatting of your date, *you may need to adjust the code below to match your date format* (e.g., change the part that says 'mdy' to ydm, dmy, myd, dym, etc.)
 
 -  Extract the year and month from the date column 
 
@@ -259,17 +274,16 @@ In the code chunk below, we prepare the data for analysis. You may need to edit 
 
 # Prepare data
 data <- df %>%
-  mutate(Date = str_remove(Date, " .*"),  # remove everything after the first space (e.g., sometimes timestamp is here after space)
-         Date = mdy(Date),  # Convert 'Date' column to Date class
+  mutate(Date = str_remove(Date, " .*"),  # this removes timestamps from dates (if present)
+         Date = mdy(Date),  # # # # # ADJUST 'mdy' TO REFLECT YOUR DATE FORMAT
          Year =year(Date),
-         Month = month(Date),  # 
-         DOY = yday(Date)) %>%  # 
-  filter(Month %in% 7:10) %>%  # Filter for months of interest
+         Month = month(Date),  
+         DOY = yday(Date)) %>%  
+  filter(Month %in% 7:10) %>%  # # # # # ADJUST TO FILTER YOUR MONTHS OF INTEREST
   group_by(Site,Date, Year, Month, DOY) %>%  # 
-  summarize(avg_Obs = round(mean(Obs, na.rm = TRUE)),  # daily rating consistent with Bellucci et al 
-            MeanRating = mean(Obs, na.rm = TRUE), # mean (not rounded) daily rating for use in inferential model
-            DurObs = ifelse(avg_Obs > 3, 1, 0),  #
-            .groups = "drop")  # 
+  summarize(avg_Obs = round(mean(Obs, na.rm = TRUE)),  
+            DurObs = ifelse(avg_Obs > 3, 1, 0),  
+            .groups = "drop")   
 
 ```
 We can now take a look at the data, and check that everything looks as it should.
@@ -429,7 +443,7 @@ export_table(as.data.frame(metrics.table), "metrics_legend.csv")
 ```
 
 
-Table 4 below presents the numerical results for all of the above stream connectivity metrics based on the average daily stream connectivity categories in your data.
+Table 4 below presents the numerical results for all of the above stream connectivity metrics based on the average daily stream connectivity categories in your data. We export both tables 3 and 4 to your output folder.
 
 
 
@@ -492,19 +506,20 @@ calculate_metrics <- function(site_data) {
 
 # Calculate metrics for all sites and reshape the data
 flow_metrics_df <- data %>%
-  group_by(Site) %>% 
+  group_by(Site, Year) %>% 
   nest() %>% 
   mutate(metrics = map(data, calculate_metrics)) %>% 
   unnest(metrics) %>% 
-  arrange(Site, Metric) %>% # arrange in alpha order
+  arrange(Site, Year, Metric) %>%
+  mutate(Site_Year = paste(Site, Year, sep = "_")) %>%  # <-- Create unique ID for pivoting
   pivot_wider(
-    id_cols = c(Metric, Measure), 
-    names_from = Site, 
+    id_cols = c(Metric, Measure),
+    names_from = Site_Year,            # <-- Use Site_Year as column headers
     values_from = Value
-  ) 
+  )
 
 #export table as needed
-export_table(as.data.frame(flow_metrics_df), "flow_metrics.csv")
+export_table(as.data.frame(flow_metrics_df), "metrics_by_site_year.csv")
 
 
 # Create a reactable table (for display in Rmd.)
@@ -645,13 +660,15 @@ The above figures can be very informative for interpreting distinct changes in f
 
 Many familiar statistical tests are unsuitable for data like streamflow because temporal autocorrelation (flow today being associated with flow yesterday and flow tomorrow) violates assumptions of independence among observations. Furthermore, we might anticipate non-normality in restoration site flow data: we are probably monitoring at a location and during a period featuring a relatively high frequency of extreme values, but our data is constrained in variability by the rating system and the limited timeframe. 
 
-Here we present a generalized linear model (glm), an inferential test that may overcome these difficulties. However, since the test and its interpretation may be less familiar, we urge caution in interpreting the results. It may be advisable to focus your interpretation on the changes in the metrics and the figures above, particularly if you are not comfortable with understanding the hypothesised linear model and interpreting the various values both independently and when taken together. Below we will provide the code for our generalized linear model, and some notes on interpretation.
+Here we present a generalized linear model (glm), an inferential test that may overcome these difficulties. However, since the test and its interpretation may be less familiar, we urge caution in interpreting the results. It may be advisable to focus your interpretation on the changes in the metrics and the figures above, particularly if you are not comfortable with understanding the hypothesised linear model and interpreting the various values both independently and when taken together. 
+
+However, if you are comfortable with this, and base your interpretation only on your *a priori* hypotheses, the generalized linear model below can be useful in teasing apart changes due to restoration actions, background changes in seasonality of flows, and unmeasured differences among sites.
 
 #### Before / After Years
 
 Consistent with the BACI study design, we consider your restoration action as a discrete event that (we hope) changes stream connectivity such that we can detect a difference between data from before and data from after the restoration action. 
 
-Enter in the below code the years that you consider 'before' and 'after' your restoration action. You may have more than one year in each category. It is important that the data from reference and restoration sites should be aligned temporally. 
+Enter in the below code the years that you consider 'before' and 'after' your restoration action. You may have more than one year in each category. It is important that the data from reference and restoration sites should are aligned temporally. 
 
 ```{r define before after}
 # Define "Before" and "After" years
@@ -687,7 +704,7 @@ The terms are as follows:
 - **Site** is a factor which typically has two levels: a control site and a restoration site
 - **Time** is a factor that we assigned two levels: before and after, defined relative to the restoration event
 - **Day of Year** models seasonal trends in flow and, by using a quadratic polynomial, allows for curved seasonal trends
-- **Rating(<sub>t-1</sub>)** is a lag term to account for temporal autocorrelation, it uses the previous day's rating as an explanatory variable.
+- **Rating<sub>t-1</sub>** is a lag term to account for temporal autocorrelation, it uses the previous day's rating as an explanatory variable.
 
 We have included interactions among site, time, and day of year, primarily because we are interested in:
 
@@ -700,36 +717,30 @@ Other interaction terms can tell us whether there are potential background diffe
 
 Interpretation of the model results requires consideration of these types of effects potentially happening concurrently, as well as recognition of the unexplained variability that is not captured by our simple hypothetical model, but that might also correlate with our explanatory variables.
  
-
-
-# here
-
-A few notes about our approach:
+Here are a few more notes about our approach:
 
 - We have opted for a Conway-Maxwell Poisson ('COM-Poisson') family generalized linear model. We use this, rather than the more familiar negative binomial or Poisson glms, because we need the flexibility to deal with either under- or over-dispersed data, and potential asymmetry. In fact, we might anticipate under-dispersion in many cases (e.g., many similar ratings through much of the monitoring season), and neither a negative binomial nor a Poisson family is suitable here.
 
-- We generate confidence intervals, and recommend interpretations based on confidence intervals rather than p-value cut-offs. We are using the same data to generate a dispersion parameter and to estimate model coefficients. With smaller sample sizes (in the hundreds) this can be anti-conservative (more false positives) and confidence intervals can better reflect the uncertainty in estimates.
+- We generate confidence intervals, and recommend interpretations based on confidence intervals rather than p-value cut-offs. We are using the same data to generate a dispersion parameter and to estimate model coefficients. With smaller sample sizes (in the hundreds) this can be anti-conservative (more false positives) and confidence intervals can better reflect the uncertainty in estimates. In the table generated below, we suppress p-values to avoid the temptation of accepting their face-value. 
 
-# perhaps a note/ fix for if you have discontinuous data (e.g. if your battery ran out and you have a gap in your season... the lag variable would presumably assume that the day before the break is impacting the day after in the same way...)
+- This model is useful for interpreting whether or not there are effects that appear 'real' or statistically significant (confidence intervals do not span zero and are not excessively broad) and understanding the direction of the effect (negatively or positively effecting the rating value). The estimated effect sizes for each coefficient are *not* considered comparable or easily interpretable because they use different scales (e.g., factor, quadratic) and the transformations and interactions generally preclude interpretation of these values. Your interpretation of the terms should be qualitative in nature. For this reason, we do not plot or export a coefficient figure comparing the effect size estimates, though we do provide the code in the below chunk.
 
-# model_nb <- glm.nb(MeanRating ~ Site * Time_Category * poly(DOY, 2) + MeanRating_lag,  data = data_model
-# poisson_model <- glm(MeanRating ~ Site * Time_Category * poly(DOY, 2) + MeanRating_lag, family = poisson, data = data_model)
-# data may actually be underdispersed. rounding of daily value could contribute to this. so I should create a new variable (MeanRating) and use this in the glm. 
-# I should test dispersion first and use appropriate model (nb for overdispersion, poisson for dispersion around 1, underdispersed could try COM-Poisson?? or quasi-Poisson?) Maybe I should try COM-Poisson given the variety of datasets and its flexibilty, and the high potential for underdispersed data (many day values at the same level through summer)
+## COM-Poisson Generalized Linear Model
 
-# I want to use CIs and not rely on p values, since COM-Poission uses the same data to generate a dispersion parameter as to estimate the model coefficients, which can be anti-conservative  (increased type 1 errors) if we have small sample sizes (which may be the case if we have only a few months of daily data)
+Note that this next chunk of code can take a few minutes to run while it generates confidence intervals. Maybe enough time for you to take a break from the computer screen...
 
-#  Ishould include example output and interpretation.
+```{r glm and CIs, echo = FALSE}
 
-# also include predicted seasonal curves?
-  
-```{r glm, echo = FALSE}
-
-# sort data to create lag variable within each site-year
+# sort data to create lag variable within each site-year, and to account for potential discontinuities in data (e.g., battery died, misses week)
 data <- data %>%
   arrange(Site, Year, DOY) %>%
   group_by(Site, Year) %>%
-  mutate(avg_Obs_lag = lag(avg_Obs)) %>%
+  mutate(
+    DOY_lag = lag(DOY),
+    gap = DOY - DOY_lag,
+    avg_Obs_prev = lag(avg_Obs),
+    avg_Obs_lag = if_else(gap <=2 & !is.na(avg_Obs_prev), avg_Obs_prev, NA_real_) #allows lag to extend one extra day, no more
+  ) %>%
   ungroup()
 
 # remove NAs introduced in lag variable (i.e. first day per year, missing days)
@@ -738,24 +749,117 @@ data_model <- data %>%
 
 # Fit the COM-Poisson model
 model_com <- glmmTMB(
-  avg_Obs ~ Site * Time_Category * poly(DOY, 2) + avg_Obs_lag,
+  avg_Obs ~ Site * Time_Category * poly(DOY, 2) + avg_Obs_lag, # avg_Obs = rating, poly(DOY,2) = quadratic day of year, avg_Obs_lag = rating t-1
   family = "compois",
   data = data_model
 )
 
-summary(model_com)
+# Extract coefficients
+coefs <- summary(model_com)$coefficients$cond
+coefs_df <- data.frame(
+  Term = rownames(coefs),
+  Estimate = coefs[, "Estimate"],
+  stringsAsFactors = FALSE
+)
 
-# generate confidence intervals (profile likelihood)
-confint(model_com, method = "profile")
+# Get confidence intervals - may take several minutes
+conf_int <- confint(model_com, method = "profile")
+conf_int_df <- as.data.frame(conf_int)
+conf_int_df$Term <- rownames(conf_int_df)
+
+# we explicitly check for convergence issues
+conv_check <- model_com$fit$convergence
+
+# Evaluate convergence status
+if (conv_check != 0) {
+  # If convergence did not succeed, display the appropriate error message
+  message("❌ Model may not have converged properly. Consider checking model specifications.")
+  
+  # If the model has a message field, show it
+  if (!is.null(model_com$fit$message)) {
+    message("  Issue: ", model_com$fit$message)
+  } else {
+    message("  No detailed message provided.")
+  }
+} else {
+  # If convergence was successful, print this message
+  message("✅ Model convergence appears OK.")
+}
+```
+
+The above code included a check for model convergence, and unless you see the message indicating that model convergence is ok, it is unwise to interpret the coefficient estimates. If your model did not converge, it may be advisable to remove some of the interaction terms from the model (E.g. simplify the Time * DOY to Time + DOY). This means your interpretation will differ, but should result in a simpler model that can converge and be interpreted validly.  
+
+The next step, before looking at the model coefficient estimates and confidence intervals, is to check the degree of multicollinearity among the predictors. We generate variance inflation factors here: If you are seeing values greater than 5 in the right-hand column of the table  below, it may be advisable to remove some of the interaction terms from the model, otherwise the variance (and ability to identify 'real' effects) will be impacted.
+
+```{r VIFs, echo = FALSE, warning=FALSE, message = FALSE}
+# Fit a linear proxy model for VIF checking only (not possible for COMPOisson model)
+model_lm <- lm(
+  avg_Obs ~ Site * Time_Category * poly(DOY, 2) + avg_Obs_lag,
+  data = data_model
+)
+
+# Compute VIFs for base predictors only
+vif(model_lm)
+```
+If your model converged and there is no indication of excessive multicollinearity, we think it is appropriate to interpret the estimates of the model. Focus on the interaction terms of  **site x time** and **site x time x day of year**, which can suggest effects of your restoration actions, but remember that the effect size values across coefficients are not easily comparable. Look at which confidence intervals do not span 0 and use this as an indication that the particular term appears to have had a 'real' effect on the daily rating value.
+
+```{r print glm results, echo = FALSE}
+
+# separated from previous chunk to avoid re-generating CIs if modifying output table/plot
+
+# Print model summary header only (formula, AIC, dispersion)
+cat("Model Summary:\n")
+cat("Formula: ", deparse(formula(model_com)), "\n")
+cat("AIC:", AIC(model_com), "\n")
+cat("Dispersion parameter (COM-Poisson):", sigma(model_com), "\n\n")
+
+# Only keep rows that match fixed effect terms
+conf_int_df_fixed <- conf_int_df %>%
+  filter(Term %in% coefs_df$Term)
+
+# Combine into single table, dropping p-values
+final_table <- left_join(coefs_df, conf_int_df_fixed, by = "Term") %>%
+  dplyr::select(Term, Estimate, `2.5 %`, `97.5 %`) %>%
+  rename(
+    `Lower CI` = `2.5 %`,
+    `Upper CI` = `97.5 %`
+  )
+
+# Display table
+kable(final_table, digits = 3, caption = "COM-Poisson glm Coefficient Estimates with 95% Profile Likelihood CIs")
+
+# export table
+export_table(as.data.frame(final_table), "glm_coefficients_CIs.csv")
+
+# # Optional: plot coefficients to visually examine which exclude zero and general direction of effect. NOTE: DO NOT INTERPRET EFFECT SIZE MAGNITUDES (SCALES DIFFER, E.G. FACTORS, QUADRATICS, TRANSFORMATIONS AND INTERACTIONS PRECLUDE SIMPLE INTERPRETATION OF EFFECT SIZES)
+# ggplot(final_table, aes(x = Estimate, y = reorder(Term, Estimate))) +
+#   geom_point() +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2) +
+#   geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+#   labs(x = "Estimate", y = "Term", title = "Model Coefficients with 95% CI") +
+#   theme_minimal()
 ```
 
 
-# to do:
+Although we strongly recommend familiarising yourself with glms before drawing any conclusions, we will provide some thoughts and interpretation of the example output shown in the .html guidance document, which may be of assistance in understanding the output generated for your data.
 
-- inferential test
-- ensure exports are correct (all figs, and table with descrtiptiuonsof metric,s and metrics)
-- test with actual raw daily data
-- remove MeanRating if it is not used (COM Poisson needs count)
+**Quadratic terms**: Because we included a quadratic term to account for non-linearity in seasonal trends (DOY), two coefficients are estimated wherever the DOY variable appears. These coefficients are not directly interpretable as linear or quadratic effects in the original DOY scale. Instead, they represent orthogonal (uncorrelated) components of a transformed version of DOY. Much like in Principal Component Analysis (PCA), these components are ordered by the amount of variance they explain, with the first term (suffixed 1) capturing the dominant trend and the second term (suffixed 2) capturing additional curvature. If either term is significant, this suggests that DOY (i.e., seasonal timing) has an effect on the response variable. The significance of the first term alone (without the second) suggests a relatively simple seasonal trend, whereas the second term alone (without the first) suggests curvature but in the absence of an overall trend (e.g., a U-shaped or inverted U-shaped pattern).
+
+**Site x Time**: Our example data had an estimate of -0.225 with 95 % confidence intervals from -0.10 to -0.35. We interpret this as a statistically significant change in the average daily rating at the restoration site after restoration, relative to the reference site. The negative estimate suggests the increase in ratings over time (greater stream connectivity) at the restoration site is not seen (or is notably smaller in magnitude) at the reference site.
+
+**Site × Time × DOY**: Our example data had estimates of 2.591 (95% CI: 0.013 - 5.157) for the first polynomial term, and 6.237 (95% CI: 3.611 - 8.859) for the second. Although the confidence intervals are large, and for the first polynomial are close to zero, both components of this interaction are considered significant. This suggests that the shape of the seasonal pattern shifted after restoration at the restoration site, in a manner that was not observed at the reference site. 
+
+**Other interactions**: The second of the polynomial terms for Time X DOY interaction has confidence intervals that exclude zero, suggesting that there is a change in the shape of the seasonal trend across time that is common to both sites. Both polynomial terms for Site x DOY are significant, suggesting there is an underlying shape difference in the seasonal trend between sites, that was independent of the restoration action. Because these terms are included in our model, our focal interactions above can be considered to be independent (or in addition to) these effects.
+
+**Interpretation**: 
+
+Considering these results together, we observed changes that are not associated with our restoration action (sites had underlying differences in seasonal rating trends, as well as both trends changing in a similar way over the years). However, despite these outside influences on the daily ratings, our restoration site was uniquely associated with an increase in the average value of ratings as well as an altered seasonal trend, which we can consider attributable to our restoration actions. The simplest way to understand this trend is to look at the metrics and the figures generated previously, which imply that our restoration caused an increase in connectivity and that higher levels of connectivity persisted later into summer, before returning to levels similar to the reference site.
+
+However, we note from our figures and metrics that we are seeing unusually high ratings in midsummer only at our restoration site. While we hoped that our restoration would slow down the disconnection of habitats, we had no *a priori* mechanism to explain increasing connectivity during summer. This illustrates an important consideration: Unmeasured variables that are not included in the model might explain the variation better than the variables that we were able to include. For example, if we had data for a series of highly-localised precipitation events that impacted only the restoration site and only occurred in our after years, perhaps that would better explain the observed changes in connectivity ratings (and alter the effect size estimates, and whether or not the confidence intervals span 0, for the various terms in our model). 
+
+Finally, even if we were to interpret these results as our restoration actions successfully improving the connectivity rating at our restoration site, we must consider what this actually means for our restoration objectives and target species. Is the change in the rating deemed biologically meaningful? Can our target species persist through a crucial life stage with the extra connectivity we observed?
+
+As always, it helps to talk through your results and your interpretation with others who are familiar with the study system. We hope that this code has been helpful in advancing your understanding of your restoration actions and their potential impacts.
 
 
 
