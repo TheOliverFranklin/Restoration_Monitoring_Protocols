@@ -14,7 +14,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 if (!requireNamespace("pacman", quietly = TRUE)) {
   install.packages("pacman")}
-pacman::p_load(rmarkdown, ggplot2,lubridate, dplyr, stringr, tidyr, purrr, reactable, knitr, htmltools, tmap, sf,leaflet,kableExtra, DT, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
+pacman::p_load(rmarkdown, ggplot2,lubridate, dplyr, stringr, tidyr, purrr, reactable, knitr, htmltools, tmap, sf,leaflet,kableExtra, DT, MASS, car, DHARMa, glmmTMB, boot, update=F) # Note, update=F prevents pacman from checking for package updates when loading them. Useful to avoid unexpected version changes and slow script execution. Adjust as necessary. 
 ```
 
 ```{r export functions, echo = FALSE}
@@ -259,14 +259,16 @@ In the code chunk below, we prepare the data for analysis. You may need to edit 
 
 # Prepare data
 data <- df %>%
-  mutate(Date = dmy(Date),  # Convert 'Date' column to Date class
+  mutate(Date = str_remove(Date, " .*"),  # remove everything after the first space (e.g., sometimes timestamp is here after space)
+         Date = mdy(Date),  # Convert 'Date' column to Date class
          Year =year(Date),
          Month = month(Date),  # 
          DOY = yday(Date)) %>%  # 
   filter(Month %in% 7:10) %>%  # Filter for months of interest
   group_by(Site,Date, Year, Month, DOY) %>%  # 
-  summarize(avg_Obs = round(mean(Obs, na.rm = TRUE)),  # 
-            DurObs = ifelse(avg_Obs > 3, 1, 0),  # 
+  summarize(avg_Obs = round(mean(Obs, na.rm = TRUE)),  # daily rating consistent with Bellucci et al 
+            MeanRating = mean(Obs, na.rm = TRUE), # mean (not rounded) daily rating for use in inferential model
+            DurObs = ifelse(avg_Obs > 3, 1, 0),  #
             .groups = "drop")  # 
 
 ```
@@ -641,7 +643,7 @@ The above figures can be very informative for interpreting distinct changes in f
 
 # Inferential Test
 
-Many familiar statistical tests are unsuitable for data like streamflow because temporal autocorrelation (flow today being associated with flow yesterday and flow tomorrow) violates assumptions of independence among observations. Furthermore, we might anticipate non-normality in restoration site flow data: we are probably monitoring at a location and during a period featuring a relatively high frequency of extreme values. 
+Many familiar statistical tests are unsuitable for data like streamflow because temporal autocorrelation (flow today being associated with flow yesterday and flow tomorrow) violates assumptions of independence among observations. Furthermore, we might anticipate non-normality in restoration site flow data: we are probably monitoring at a location and during a period featuring a relatively high frequency of extreme values, but our data is constrained in variability by the rating system and the limited timeframe. 
 
 Here we present a generalized linear model (glm), an inferential test that may overcome these difficulties. However, since the test and its interpretation may be less familiar, we urge caution in interpreting the results. It may be advisable to focus your interpretation on the changes in the metrics and the figures above, particularly if you are not comfortable with understanding the hypothesised linear model and interpreting the various values both independently and when taken together. Below we will provide the code for our generalized linear model, and some notes on interpretation.
 
@@ -668,11 +670,11 @@ data <- data %>%
 
 ## Hypothesised Generalized Linear Model
 
-We refer to a hypothesised model because we aim to explain variation in the daily rating values by proposing that a set of explanatory variables have measurable effects. Essentially, we suggest that variation in these explanatory variables can account for the variation in our response variable, the daily rating. By referring to this as a hypothesis, we are acknowledging that it can be incomplete (other important variables are almost certainly missing) and/or incorrect.
+We refer to a hypothesised model because we aim to explain variation in the daily rating values by proposing that a set of explanatory variables have measurable effects. Essentially, we suggest that variation in these explanatory variables can account for the variation in our response variable, the daily rating. By referring to this as a hypothesis, we are acknowledging that it can be incomplete (other important variables are possibly missing) and/or incorrect.
 
 When selecting explanatory variables, in some cases we expect a causal effect — for example, we believe that the choice of site can have a causal effect on the rating, as our restoration efforts (that occurred at one site) will hopefully alter the rating. In other cases, explanatory variables are included to control for factors that are not directly attributable to the restoration efforts — such as seasonal changes in flow. These variables help isolate the effects of the restoration from broader influences on the rating.
 
-We wanted to clarify the hypothetical nature of our model because temporal variability in streamflow is complex. We know we cannot accurately predict it with a simple equation such as the one we propose below. Nonetheless, the model allows us to explore reasonable causal relationships and account for much of the background variability — such that our model might be able to reveal effects of our restoration effort that are not immediately obvious from figures or metrics.
+We wanted to clarify the hypothetical nature of our model because temporal variability in streamflow is complex. We know we cannot accurately predict our daily ratings with a simple equation such as the one we propose below. Nonetheless, the model allows us to explore reasonable causal relationships and account for much of the background variability — such that our model might be able to reveal effects of our restoration effort that are not immediately obvious from figures or metrics.
 
 Our hypothesised model to explain variation in daily rating values is:
 
@@ -685,29 +687,75 @@ The terms are as follows:
 - **Site** is a factor which typically has two levels: a control site and a restoration site
 - **Time** is a factor that we assigned two levels: before and after, defined relative to the restoration event
 - **Day of Year** models seasonal trends in flow and, by using a quadratic polynomial, allows for curved seasonal trends
-- **Rating(<sub>t-1</sub>)** is a lag term to account for autocorrelation, it uses the previous day's rating as an explanatory variable.
+- **Rating(<sub>t-1</sub>)** is a lag term to account for temporal autocorrelation, it uses the previous day's rating as an explanatory variable.
 
 We have included interactions among site, time, and day of year, primarily because we are interested in:
 
 - How the daily rating values may have changed differently between the control and reference sites since the restoration action (site * time), as well as
 - How the rate of change of the daily rating values through the season may have changed differently between the control and reference sites since the restoration action (site * time * day of year). 
 
-As an example of the difference between these two interactions: In the former we might detect an absolute increase in average daily ratings at our restoration site after the restoration that was not observed at our reference site; In the latter we might, despite perhaps the same average daily rating, see at our restoration site (and after restoration) that the daily ratings stay higher for longer before falling, and that this change was not evident at the reference site.
+As an example of the difference between the above two interactions: In the former we might detect an absolute increase in average daily ratings at our restoration site after the restoration (and this was not observed at our reference site); In the latter we might, despite perhaps the same average daily rating, see at our restoration site (and after restoration) that the daily ratings stay higher for longer before falling, and that this change was not evident at the reference site.
 
-Additional interaction terms can tell us whether there are potential background differences between the seasonal flow patterns between sites (site * day of year), or whether the seasonal flow patterns appear to have changed over the years, similarly at both sites (time * day of year).
+Other interaction terms can tell us whether there are potential background differences between the seasonal flow patterns between sites (site * day of year), or whether the seasonal flow patterns appear to have changed over the years, similarly at both sites (time * day of year).
 
 Interpretation of the model results requires consideration of these types of effects potentially happening concurrently, as well as recognition of the unexplained variability that is not captured by our simple hypothetical model, but that might also correlate with our explanatory variables.
-
+ 
 
 
 # here
+
+A few notes about our approach:
+
+- We have opted for a Conway-Maxwell Poisson ('COM-Poisson') family generalized linear model. We use this, rather than the more familiar negative binomial or Poisson glms, because we need the flexibility to deal with either under- or over-dispersed data, and potential asymmetry. In fact, we might anticipate under-dispersion in many cases (e.g., many similar ratings through much of the monitoring season), and neither a negative binomial nor a Poisson family is suitable here.
+
+- We generate confidence intervals, and recommend interpretations based on confidence intervals rather than p-value cut-offs. We are using the same data to generate a dispersion parameter and to estimate model coefficients. With smaller sample sizes (in the hundreds) this can be anti-conservative (more false positives) and confidence intervals can better reflect the uncertainty in estimates.
+
+# perhaps a note/ fix for if you have discontinuous data (e.g. if your battery ran out and you have a gap in your season... the lag variable would presumably assume that the day before the break is impacting the day after in the same way...)
+
+# model_nb <- glm.nb(MeanRating ~ Site * Time_Category * poly(DOY, 2) + MeanRating_lag,  data = data_model
+# poisson_model <- glm(MeanRating ~ Site * Time_Category * poly(DOY, 2) + MeanRating_lag, family = poisson, data = data_model)
+# data may actually be underdispersed. rounding of daily value could contribute to this. so I should create a new variable (MeanRating) and use this in the glm. 
+# I should test dispersion first and use appropriate model (nb for overdispersion, poisson for dispersion around 1, underdispersed could try COM-Poisson?? or quasi-Poisson?) Maybe I should try COM-Poisson given the variety of datasets and its flexibilty, and the high potential for underdispersed data (many day values at the same level through summer)
+
+# I want to use CIs and not rely on p values, since COM-Poission uses the same data to generate a dispersion parameter as to estimate the model coefficients, which can be anti-conservative  (increased type 1 errors) if we have small sample sizes (which may be the case if we have only a few months of daily data)
+
+#  Ishould include example output and interpretation.
+
+# also include predicted seasonal curves?
+  
+```{r glm, echo = FALSE}
+
+# sort data to create lag variable within each site-year
+data <- data %>%
+  arrange(Site, Year, DOY) %>%
+  group_by(Site, Year) %>%
+  mutate(avg_Obs_lag = lag(avg_Obs)) %>%
+  ungroup()
+
+# remove NAs introduced in lag variable (i.e. first day per year, missing days)
+data_model <- data %>% 
+  filter(!is.na(avg_Obs_lag))
+
+# Fit the COM-Poisson model
+model_com <- glmmTMB(
+  avg_Obs ~ Site * Time_Category * poly(DOY, 2) + avg_Obs_lag,
+  family = "compois",
+  data = data_model
+)
+
+summary(model_com)
+
+# generate confidence intervals (profile likelihood)
+confint(model_com, method = "profile")
+```
 
 
 # to do:
 
 - inferential test
 - ensure exports are correct (all figs, and table with descrtiptiuonsof metric,s and metrics)
-
+- test with actual raw daily data
+- remove MeanRating if it is not used (COM Poisson needs count)
 
 
 
