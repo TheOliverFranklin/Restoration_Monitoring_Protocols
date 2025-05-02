@@ -121,7 +121,7 @@ standardize_column_types <- function(df) {
 
 # Guidance Format
 
-We have written this script in R markdown (.rmd file) and printed it as an .html document. As **Step 1** we recommend that you read through the .html file, which we printed using some example data (sourced from Bellucci et al. 2020). The .html file contains all the written guidance, but omits most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+We have written this script in R markdown (.rmd file) and printed it as an .html document. As **Step 1** we recommend that you read through the .html file, which we printed using some fabricated example data. The .html file contains all the written guidance, but omits most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
 
 - You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
 
@@ -144,15 +144,15 @@ This script analyses trailcam-derived quantitative data associated with two aspe
 - The hydrological connections among pools and riffles along a longitudinal continuum within a channel; and 
 - The hydrological connections across nodes (confluences, bifurcations) that link stream channels with tributaries, subordinate channels, or off-channel features (ponds, oxbows, etc.). 
 
-This script is adapted from Bellucci et al. 2020, in which they developed and tested a methodology that assesses stream connectivity using trail cameras. Their approach involves the following:
+This script is adapted from Bellucci et al. 2020, in which they developed and tested a methodology that assesses longitudinal stream connectivity using trail cameras. Their approach involves the following:
 
 1. Assigning stream connectivity categories (see Table 1, below) to hourly trail camera images
-2. Calculating average daily stream connectivity estimates. 
-3. Generating summary metrics using the daily estimates. The metrics are used to examine the temporal extents of stream connectivity across the monitoring period (Table 3). 
+2. Calculating average daily stream connectivity estimates from the hourly images. 
+3. Generating summary metrics using the daily estimates. The metrics are used to examine variability in stream connectivity across the monitoring period (Table 3). 
 
 Their methodology provides a cost-effective monitoring tool to characterize stream connectivity during critical rearing and growth bioperiods for fish, and during periods of environmental stress. While this approach is not a substitute for measuring streamflow directly, it can provide meaningful localised information on stream connectivity where information from streamflow gauges is limited or absent. 
 
-We adapted their approach for the context of monitoring restoration projects. This involved including an inferential test, which can allow statistical comparisons of (e.g.) a restored reach and a control or reference reach, with the intention that users can attribute observed change to their restoration actions when using a BACI (before-after-control-impact) study design. We have also include a parallel categorical rating system for application at nodes (confluences or bifurcations with off-channel or side-channel habitats).
+We adapted their approach for the context of monitoring restoration projects, and introduced the categorical rating system for application at nodes (confluences or bifurcations with off-channel or side-channel habitats). In adapting the approach for restoration monitoring, we have assumed a BACI (before-after-control-impact) study design, but the code will still be useful to examine your data in the absence of multiple years and/or without control sites. Notably, the inferential test we included is designed for data with both before/after and with a control or reference site. Without this data it is not possible to statistically control for background variation and to therefore attribute observed changes to their restoration actions.
 
 We have built on the metric calculations, example data, and R source code from Bellucci et al. 2020, available [here](https://github.com/marybecker/streamconnectivitymetrics). 
 
@@ -162,7 +162,7 @@ You are probably using this approach because your focal system does not have est
 
 **hydrographR**: An R package designed to generate hydrographs using Water Survey of Canada data. Unlike other hydrograph tools, it allows users to select a specific year's trace and compare it to historical values. This feature enables the rapid identification of unusual hydrologic patterns and helps produce quick hydrologic backgrounds for preliminary desktop reviews of an area.
 
-**StreamTrackR**: An R tool for managing and analyzing stream monitoring data, helping users track sites, access up to date hydrometric information, and analyze trends. It generates summary reports of current streamflow conditions at selected stations, outputting the results in a tidy HTML format. An example report from December 2024 is attached.
+**StreamTrackR**: An R tool for managing and analyzing stream monitoring data, helping users track sites, access up to date hydrometric information, and analyze trends. It generates summary reports of current streamflow conditions at selected stations, outputting the results in a tidy HTML format.
 
 Both tools are available on GitHub here [hydroGraphR](https://github.com/pausoto7/hydroGraphR.git) and here [StreamTrackR](https://github.com/pausoto7/StreamTrackR.git).
 
@@ -170,7 +170,7 @@ Both tools are available on GitHub here [hydroGraphR](https://github.com/pausoto
 
 # Stream Connectivity Categorisation
 
-Table 1 presents the six stream connectivity categories developed by Bellucci et al. 2020 to relate flow and habitat availability to biological processes in streams, for trailcam images collected at riffle-pool sequences. Beneath this, in Table 2, are the corresponding categories that we propose to use for images collected at nodes.
+Table 1 presents the six stream connectivity categories developed by Bellucci et al. 2020 for trailcam images collected at riffle-pool sequences. Beneath this, in Table 2, are the corresponding categories that we propose to use for images collected at nodes.
 
  
 ```{r Table 1, echo=FALSE}
@@ -213,10 +213,11 @@ Now you are reminded of the process, we will get started.
 
 # Image Categorisation
 
-Before we can generate the metrics, you must assign a category to each hourly trailcam photo in which the stream is visible. 
+Before we can generate the metrics, you must assign a category from either Table 1 or Table 2 (as applicable) to each hourly trailcam photo in which the stream is visible. 
+
 Before doing so, and especially if you have more than one person rating the images, you should spend some time calibrating yourselves. Review a set of random images from your site and practice assigning the most appropriate category. Keep track of the image reference and your rating, and check for discrepancies against a subsequent round of rating (or with another reader). Discuss potential discrepancies and reach a consensus before proceeding to the actual categorisation.
 
-When categorising the data, you should create a csv file with rows featuring the reference name for the reach/location (call this column *'Site'*), date (*'Date'*), and the rating for each image (column name *'Obs'*). It is not necessary to record a rating for every single hourly image (e.g., if there is insufficient light for a determination). This script will calculate the average daily rating from the hourly ratings that you enter.
+When categorising the data, you should create a csv file with columns featuring the reference name for the reach/location (call this column *'Site'*), date (*'Date'*), and the rating for each image (column name *'Obs'*). It is not necessary to record a rating for every single hourly image (e.g., if there is insufficient light for a determination). This script will calculate the average daily rating from the hourly ratings that you enter. You do not need to specify the time for each image, as our code will just use the date to generate the average daily rating.
 
 If your trailcam did not generate an index file with the timestamps for each photo, it may be possible to use the R package [exifr](https://www.npmjs.com/package/exifr) or a standalone tool like [exiftool](https://exiftool.org/) to extract this data and save time with file creation. 
 
@@ -255,20 +256,11 @@ df <- csv_files %>%
 
 # Data Preparation
 
-In the code chunk below, we prepare the data for analysis. You may need to edit the values in the code to suit your project. The steps are: 
+In the code chunk below, we prepare the data for analysis. You may need to edit a couple of values in the code to suit your project. In particular:
 
--  Convert the 'Date' column (character data) to date class. Depending on the formatting of your date, *you may need to adjust the code below to match your date format* (e.g., change the part that says 'mdy' to ydm, dmy, myd, dym, etc.)
+-  Depending on the formatting of your date, *you may need to adjust the code below to match your date format* (e.g., change the part that says 'mdy' to ydm, dmy, myd, dym, etc.)
 
--  Extract the year and month from the date column 
-
--  Extract the day of the year (DOY) from the date column (so that the date is expressed by one number)
-
--  Filter the data to include only the range of interest. To do this, *adjust 'filter(Month %in% 7:10)' as necessary*. In this instance, we have filtered the data to only include months from July (7th month) through to October (10th month)
-
--  Calculate the average daily stream connectivity category (new column called 'avg_Obs'), by averaging observations for each site and date 
-
--  Create a binary column (called 'DurObs') to categorize average daily stream connectivity category as 'disconnected' / rating less than or equal to 3 (assigned '0') or 'connected' / rating more than 3 (assigned '1'). This column is useful in generating some of the metrics and in case you are following the connected/disconnected convention established by Bellucci et al 2020.
-  
+-  You may need to filter the data to include only the range of interest. To do this, *adjust 'filter(Month %in% 7:10)' as necessary*. In this instance, we have filtered the data to only include months from July (7th month) through to October (10th month) inclusive.
 
 ```{r data preparation}
 
@@ -286,7 +278,9 @@ data <- df %>%
             .groups = "drop")   
 
 ```
-We can now take a look at the data, and check that everything looks as it should.
+
+We can now take a look at the data, and check that everything looks as it should. The column DOY refers to day of year (e.g., the 182nd day of the year is July 7th), avg_Obs refers to the mean of the hourly ratings for that day, rounded to the nearest integer, and DurObs is a binary (0/1) assignment used by Bellucci et al 2020 which groups categories 1-3 as disconnected and categories 4-6 as connected.
+
 
 ```{r view data, echo = FALSE}
 # display the data
@@ -336,7 +330,7 @@ if (interactive()) {
 
 At this point, when running the code in RStudio, you will be prompted within the console to specify a folder for the output. When prompted you will need to enter the folder location (e.g., C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code). If your R environment is cleared between scripts, you will be prompted again to specify the location. 
 
-We will now export the tidied dataframe to your specified folder for reference or subsequent analyses.
+We will export the tidied dataframe to your specified folder for reference or subsequent analyses.
 
 ```{r df export, echo = FALSE}
 export_table(as.data.frame(data),"StreamConnectivity_dataframe.csv")
@@ -344,10 +338,6 @@ export_table(as.data.frame(data),"StreamConnectivity_dataframe.csv")
 
 Check your file folder and the .csv files to see the data you exported. 
 
-
-Let's begin the analyses!
-
-# Data Analyses
 
 ## Optional: Site Location 
 
@@ -416,9 +406,13 @@ leaflet_map
 
 ```
  
-## Calculating Metrics
+ 
+# Data Analyses
 
-Bellucci et al. 2020 developed metrics to describe the magnitude, frequency, duration, and timing components of stream connectivity (Table 3) based on the average daily stream connectivity categories observed (Table 1). The metrics were developed to compare locations on the same stream (e.g., upstream and downstream of a stressor), or to compare a potentially impacted site to a least disturbed site. 
+## Connectivity Metrics
+
+Bellucci et al. 2020 developed metrics to describe the magnitude, frequency, duration, and timing components of stream connectivity (Table 3) based on the average daily stream connectivity ratings (Table 1). The metrics were developed to compare locations on the same stream (e.g., upstream and downstream of a stressor), or to compare a potentially impacted site to a least disturbed site. 
+
 We have adapted these slightly by removing the reference to the 'connected' or 'disconnected' dichotomy, which as mentioned above may not be as appropriate for node connectivity. Otherwise the metrics remain unchanged.
 
 
@@ -443,7 +437,7 @@ export_table(as.data.frame(metrics.table), "metrics_legend.csv")
 ```
 
 
-Table 4 below presents the numerical results for all of the above stream connectivity metrics based on the average daily stream connectivity categories in your data. We export both tables 3 and 4 to your output folder.
+Table 4 below presents the above stream connectivity metrics based on the average daily stream connectivity ratings in your data and grouped by site and by year. We export both tables 3 and 4 to your output folder for future reference.
 
 
 
@@ -546,7 +540,7 @@ tags$div(
 
 ## Data Visualization
 
-Here we present two figures that are useful in exploring changes at your restoration site and at the control site over time. The figures show the daily rating across time along the x axis (day of year).
+Here we present two figures that should be useful in exploring changes at your restoration site and at the control site over time. The figures show how the daily rating changes through time along the x axis (day of year).
 
 - The first figure includes the groupings of ratings that Bellucci et al (2020) used: Dry (rating = 1), Disconnnected (1 < rating $\leq$ 3), or Connected (3 < rating $\leq$ 6). This is useful where you want to highlight dry conditions, and/or where the dichotomy of 1 - 3 vs 4 - 6 is appropriate for your project.
 
@@ -654,7 +648,7 @@ export_plot(dayratingsplot, "Connectivity_Daily_Ratings.pdf")
 
 ```
 
-The above figures can be very informative for interpreting distinct changes in flow. However, in many cases the interpretation can be challenging: even with well-matched reference sites, there can be underlying trends at a variety of timescales that may or may not be associated with your restoration action. To provide more assistance in understanding the data, below we provide an inferential test.
+The above figures can be very informative for interpreting distinct changes in flow. However, in many cases the interpretation can be challenging: even with well-matched reference sites, there can be underlying trends at a variety of timescales that may or may not be associated with your restoration action. To provide more assistance in understanding the data, below we provide an inferential test. However, at this stage it is useful to take some time and interpret the metrics and figures above, basing your interpretation on your objectives and *a priori* hypotheses and predictions.
 
 # Inferential Test
 
@@ -662,13 +656,13 @@ Many familiar statistical tests are unsuitable for data like streamflow because 
 
 Here we present a generalized linear model (glm), an inferential test that may overcome these difficulties. However, since the test and its interpretation may be less familiar, we urge caution in interpreting the results. It may be advisable to focus your interpretation on the changes in the metrics and the figures above, particularly if you are not comfortable with understanding the hypothesised linear model and interpreting the various values both independently and when taken together. 
 
-However, if you are comfortable with this, and base your interpretation only on your *a priori* hypotheses, the generalized linear model below can be useful in teasing apart changes due to restoration actions, background changes in seasonality of flows, and unmeasured differences among sites.
+However, if you are comfortable with this, the generalized linear model below can be useful in teasing apart changes due to restoration actions, background changes in seasonality of flows, and unmeasured differences among sites.
 
 #### Before / After Years
 
 Consistent with the BACI study design, we consider your restoration action as a discrete event that (we hope) changes stream connectivity such that we can detect a difference between data from before and data from after the restoration action. 
 
-Enter in the below code the years that you consider 'before' and 'after' your restoration action. You may have more than one year in each category. It is important that the data from reference and restoration sites should are aligned temporally. 
+Enter in the below code the years that you consider 'before' and 'after' your restoration action. You may have more than one year in each category. It is important that the data from reference and restoration sites are aligned temporally. 
 
 ```{r define before after}
 # Define "Before" and "After" years
@@ -708,22 +702,22 @@ The terms are as follows:
 
 We have included interactions among site, time, and day of year, primarily because we are interested in:
 
-- How the daily rating values may have changed differently between the control and reference sites since the restoration action (site * time), as well as
-- How the rate of change of the daily rating values through the season may have changed differently between the control and reference sites since the restoration action (site * time * day of year). 
+- How the daily rating values may have changed differently between the control and reference sites since the restoration action (site x time), as well as
+- How the rate of change of the daily rating values through the season may have changed differently between the control and reference sites since the restoration action (site x time x day of year). 
 
-As an example of the difference between the above two interactions: In the former we might detect an absolute increase in average daily ratings at our restoration site after the restoration (and this was not observed at our reference site); In the latter we might, despite perhaps the same average daily rating, see at our restoration site (and after restoration) that the daily ratings stay higher for longer before falling, and that this change was not evident at the reference site.
+As an example of the difference between the above two interactions: In the former we might detect an absolute increase in average daily ratings at our restoration site after the restoration (and this was not observed at our reference site); In the latter we might, despite perhaps the same average daily rating, see at our restoration site (and after restoration) that the daily ratings stay higher for longer before falling, and that this change was not evident at the reference site. You may understand this graphically as a shift in the elevation of a line, versus a change in the shape of a line.
 
-Other interaction terms can tell us whether there are potential background differences between the seasonal flow patterns between sites (site * day of year), or whether the seasonal flow patterns appear to have changed over the years, similarly at both sites (time * day of year).
+Other interaction terms can tell us whether there are potential background differences between the seasonal flow patterns between sites (site x day of year), or whether the seasonal flow patterns appear to have changed over the years, similarly at both sites (time x day of year).
 
 Interpretation of the model results requires consideration of these types of effects potentially happening concurrently, as well as recognition of the unexplained variability that is not captured by our simple hypothetical model, but that might also correlate with our explanatory variables.
  
-Here are a few more notes about our approach:
+Here are a few notes about our specific approach:
 
 - We have opted for a Conway-Maxwell Poisson ('COM-Poisson') family generalized linear model. We use this, rather than the more familiar negative binomial or Poisson glms, because we need the flexibility to deal with either under- or over-dispersed data, and potential asymmetry. In fact, we might anticipate under-dispersion in many cases (e.g., many similar ratings through much of the monitoring season), and neither a negative binomial nor a Poisson family is suitable here.
 
 - We generate confidence intervals, and recommend interpretations based on confidence intervals rather than p-value cut-offs. We are using the same data to generate a dispersion parameter and to estimate model coefficients. With smaller sample sizes (in the hundreds) this can be anti-conservative (more false positives) and confidence intervals can better reflect the uncertainty in estimates. In the table generated below, we suppress p-values to avoid the temptation of accepting their face-value. 
 
-- This model is useful for interpreting whether or not there are effects that appear 'real' or statistically significant (confidence intervals do not span zero and are not excessively broad) and understanding the direction of the effect (negatively or positively effecting the rating value). The estimated effect sizes for each coefficient are *not* considered comparable or easily interpretable because they use different scales (e.g., factor, quadratic) and the transformations and interactions generally preclude interpretation of these values. Your interpretation of the terms should be qualitative in nature. For this reason, we do not plot or export a coefficient figure comparing the effect size estimates, though we do provide the code in the below chunk.
+- This model is useful for interpreting whether or not there are effects that appear 'real' or statistically significant (i.e., confidence intervals do not span zero and are not excessively broad) and in understanding the direction of the effect (negatively or positively effecting the rating value). The estimated effect sizes for each coefficient are *not* considered comparable or easily interpretable because they use different scales (e.g., factor, quadratic) and the transformations and interactions generally preclude interpretation of these values. Your interpretation of the coefficients should be qualitative in nature. For this reason, we do not plot or export a coefficient figure comparing the effect size estimates, though we do provide the code in the below chunk.
 
 ## COM-Poisson Generalized Linear Model
 
@@ -801,7 +795,7 @@ model_lm <- lm(
 # Compute VIFs for base predictors only
 vif(model_lm)
 ```
-If your model converged and there is no indication of excessive multicollinearity, we think it is appropriate to interpret the estimates of the model. Focus on the interaction terms of  **site x time** and **site x time x day of year**, which can suggest effects of your restoration actions, but remember that the effect size values across coefficients are not easily comparable. Look at which confidence intervals do not span 0 and use this as an indication that the particular term appears to have had a 'real' effect on the daily rating value.
+If your model converged and there is no indication of excessive multicollinearity, we think it is appropriate to interpret the estimates of the model. Focus on the interaction terms of  **site x time** and **site x time x day of year**, which can indicate effects attributable to your restoration actions. Remember that the effect size values across coefficients are not easily comparable. Look at which confidence intervals do not span 0 and use this as an indication that the particular term appears to have had a 'real' effect on the daily rating value.
 
 ```{r print glm results, echo = FALSE}
 
@@ -853,7 +847,7 @@ Although we strongly recommend familiarising yourself with glms before drawing a
 
 **Interpretation**: 
 
-Considering these results together, we observed changes that are not associated with our restoration action (sites had underlying differences in seasonal rating trends, as well as both trends changing in a similar way over the years). However, despite these outside influences on the daily ratings, our restoration site was uniquely associated with an increase in the average value of ratings as well as an altered seasonal trend, which we can consider attributable to our restoration actions. The simplest way to understand this trend is to look at the metrics and the figures generated previously, which imply that our restoration caused an increase in connectivity and that higher levels of connectivity persisted later into summer, before returning to levels similar to the reference site.
+Considering these results together, we observed changes that are not associated with our restoration action (sites had underlying differences in seasonal rating trends, as well as both trends changing in a similar way over the years). However, despite these outside influences on the daily ratings, our restoration site was uniquely associated with an increase in the average value of ratings as well as an altered seasonal trend, which we can consider attributable to our restoration actions. The simplest way to better understand this trend is to look at the metrics and the figures generated previously, which imply that our restoration caused an increase in connectivity and that higher levels of connectivity persisted later into summer, before returning to levels similar to the reference site.
 
 However, we note from our figures and metrics that we are seeing unusually high ratings in midsummer only at our restoration site. While we hoped that our restoration would slow down the disconnection of habitats, we had no *a priori* mechanism to explain increasing connectivity during summer. This illustrates an important consideration: Unmeasured variables that are not included in the model might explain the variation better than the variables that we were able to include. For example, if we had data for a series of highly-localised precipitation events that impacted only the restoration site and only occurred in our after years, perhaps that would better explain the observed changes in connectivity ratings (and alter the effect size estimates, and whether or not the confidence intervals span 0, for the various terms in our model). 
 
