@@ -147,7 +147,7 @@ First we combine all of the data that will be compared into one dataframe. These
 
 ## Before importing data
 
-Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Note that b-axis length measurements should be in millimeters and particles (grains) < 1 mm should be classified as either sand (if gritty between fingers) or fines. 
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Note that b-axis length measurements should be in millimeters and particles (grains) < 1 mm should be classified as either sand (if gritty between fingers) or fines. If you encountered embedded particles, you can record this using by appending an upper case E to the b axis dimension (e.g., 12.2 E). 
 
 ## Data import
 
@@ -216,7 +216,7 @@ It may be necessary to subset within this dataframe if, e.g., you included more 
 
 ```
 
-Let's take a brief look through the dataframe. Look out for any errors and explore unusual entries. 
+Let's take a brief look through the dataframe. Look out for any errors and explore unusual entries. Note that, if you recorded embedded pebbles, there will be new columns that indicate if the pebble is embedded or 'free'
 
 ```{r view dataframe, echo = FALSE}
 datatable(
