@@ -166,7 +166,7 @@ data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_
 csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
 
 
-# Read and combine all CSV files into one dataframe
+# Read and combine all CSV files into one dataframe, clean sand, fines, and create new embedded variables
 df <- csv_files %>%
   map(read.csv) %>%                    # Read each CSV file
   map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
@@ -177,20 +177,34 @@ df <- csv_files %>%
     rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
   ) %>%
   
-  #account for text in b-axis column, standardize the text as 'sand' and 'fines' 
+  # Step 1 — standardize 'sand' and 'fines'
   mutate(
     across(starts_with("B_Axis_T"), ~ case_when(
-      grepl("^\\d+(\\.\\d+)?$", .) ~ as.character(as.numeric(.)),  # Keep numbers as character (this will be adjusted below)
-      grepl("sand", ., ignore.case = TRUE) ~ "sand", # account for variety of character strings for sand (caps/lowercase) and call it 'sand'
-      grepl("fine", ., ignore.case = TRUE) ~ "fines" # account for variety of character strings for fines (caps/lowercase) and call it 'fines'
-  ))) %>%
- 
-   # check if the value contains numbers or decimals, if true, convert to numeric, if false, leave as character
-  mutate(
-    B_Axis_T1 = ifelse(grepl("^[0-9.]+$", B_Axis_T1), as.numeric(B_Axis_T1), B_Axis_T1), 
-    B_Axis_T2 = ifelse(grepl("^[0-9.]+$", B_Axis_T2), as.numeric(B_Axis_T2), B_Axis_T2),
-    B_Axis_T3 = ifelse(grepl("^[0-9.]+$", B_Axis_T3), as.numeric(B_Axis_T3), B_Axis_T3)
-  )
+      grepl("^\\d+(\\.\\d+)?$", .) ~ as.character(as.numeric(.)),  
+      grepl("sand", ., ignore.case = TRUE) | grepl("^\\s*S\\s*$", ., ignore.case = TRUE) ~ "sand", # match 'sand' or single 'S'
+      grepl("fine", ., ignore.case = TRUE) | grepl("^\\s*F\\s*$", ., ignore.case = TRUE) ~ "fines", # match 'fine' or single 'F'
+      TRUE ~ .
+    ))
+  ) %>%
+  
+  # Step 2 — create Embedded_* columns from entries with a numeric value and uppercase 'E', assign 'free' to non embedded pieces
+  mutate(across(
+    starts_with("B_Axis_T"),
+    ~ ifelse(grepl("E", ., ignore.case = FALSE), "E", "free"),
+    .names = "Embedded_{.col}"
+  )) %>%
+  
+  # Step 3 — remove 'E' from numeric entries
+  mutate(across(
+    starts_with("B_Axis_T"),
+    ~ gsub("\\s*E\\s*", "", ., ignore.case = TRUE)
+  )) %>%
+  
+  # Step 4 — convert purely numeric strings to numeric type
+  mutate(across(
+    starts_with("B_Axis_T"),
+    ~ ifelse(grepl("^[0-9.]+$", .), as.numeric(.), .)
+  ))
 ```
 
 It may be necessary to subset within this dataframe if, e.g., you included more than one channel in your .csv files (surveys of multiple tributaries etc.). These scripts are intended to analyse one focal channel per reach, to compare it over time and with independent reference reaches that also feature one channel each. The code chunk below provides a method to subset your data by Site name, which can be modified to subset in other ways.
