@@ -462,8 +462,12 @@ residuals.df <- residuals.df %>%
 residuals.df$pool_id <- factor(residuals.df$pool_id, levels = as.character(sort(as.numeric(unique(residuals.df$pool_id)))))
 
 # Custom palette with more distinct colors (priority is to ID pools from adjacent ones)
-custom_palette <- c(
+base_palette <- c(
   "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33", "#A65628", "#F781BF", "#999999", "#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3", "#A6D854", "#FFD92F",   "#E5C494", "#B3B3B3", "#1B9E77", "#D95F02")
+
+# Repeat palette so it's long enough for all pools (and hopefully still distinguishing among nearby pools)
+n_pools <- length(unique(residuals.df$pool_id))
+custom_palette <- rep(base_palette, length.out = n_pools)
 
 gg<-ggplot(residuals.df, aes(x = distance)) +
   geom_line(aes(y = -Thalweg_Depth_m), color = "black", linewidth = 1, linetype = "solid") +
