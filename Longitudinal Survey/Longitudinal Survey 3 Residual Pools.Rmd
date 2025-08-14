@@ -90,7 +90,7 @@ if (interactive()) {
   }
 } else {
   # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/Longitudinal"
   if (!dir.exists(output_folder)) {
     dir.create(output_folder, recursive = TRUE)
     message("Default output folder created: ", output_folder)
@@ -295,7 +295,7 @@ calculate_residual_depths <- function(df) {
         residuals.df$distance[b] < 0) {
       
       LDM_id <- LDM_id + 1
-      downstream_depth <- residuals.df$Thalweg_Depth_m[b]
+      downstream_depth <- residuals.df$Thalweg_Depth_m[b] #projects new resid surface from this LDM
       downstream_index <- b
       residuals.df$LDM_id[b] <- LDM_id
 
@@ -337,6 +337,15 @@ calculate_residual_depths <- function(df) {
     }
   }
   
+# --- Fallback: turn leftover NA residuals into 0-depth at the thalweg ---
+# Yes this is sloppy, but I'm tired. Here we deal with an issue whereby LDMs are needed to project a new residual surface / pool, but in some cases there are no residual surfaces initiated when a pool terminates before an LDM (e.g., lower on a riffle). I cannot figure out the issue and fix elegantly, so based on assumption that this only occurs when the residual surface would continue to project at a lower elevation than the thalweg as we go upstream but do not increase in thalweg depth enough to intersect it. So my sloppy fix is here to assign 0 thalweg depth and residual surface = thalweg depth for all of the NA values (which seem to only occur in this special case)
+na_idx <- is.na(residuals.df$residual_depth) & 
+          !is.na(residuals.df$Thalweg_Depth_m) & 
+          residuals.df$Location_Code != "nickpts"
+
+residuals.df$residual_depth[na_idx]   <- 0
+residuals.df$residual_surface[na_idx] <- residuals.df$Thalweg_Depth_m[na_idx]
+
 # this bit estimates the width of the channel when flow approaches zero (the residual width) by using the ratio of residual depths to observed depths
   residuals.df$residual_width <- ifelse(
     is.na(residuals.df$residual_depth) | is.na(residuals.df$Thalweg_Depth_m) | residuals.df$Thalweg_Depth_m == 0,
