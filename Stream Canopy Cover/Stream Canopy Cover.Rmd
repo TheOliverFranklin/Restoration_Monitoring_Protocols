@@ -208,6 +208,15 @@ It may be necessary to subset within this dataframe if, e.g., you included more 
 
 # if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channels within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
 ```
+## Survey direction
+
+This code generates a plot that illustrates canopy cover across transects and along the surveyed area. To ensure the plot is oriented correctly, please indicate whether transect 1 is at the upstream or downstream extent of the survey, by editing the below code chunk:
+
+```{r survey direction}
+# --- User input: specify whether Transect 1 is upstream or downstream ---
+Transect1Location <- "upstream"   # options: "upstream" or "downstream" (include quotation marks)
+```
+
 ## Date format
 
 In case your data collection spanned more than one day in any one of your sampling years, we will isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to ymd, myd, dym, etc.):
@@ -274,9 +283,19 @@ df <- df %>%
 
 # Convert Transect_No. to numeric temporarily to find max value
 max_transect_no <- max(as.numeric(as.character(df$Transect_No.)), na.rm = TRUE)
+
+# Set the order of Transect_No. depending on prior input
+if (Transect1Location == "upstream") {
+  transect_levels <- as.character(seq(1, max_transect_no, 1))   # 1 at top
+} else if (Transect1Location == "downstream") {
+  transect_levels <- as.character(seq(max_transect_no, 1, -1))  # 1 at bottom
+} else {
+  stop("Transect1Location must be 'upstream' or 'downstream'")
+}
+
 # Convert Transect_No. back to a factor with full range for consistent y-axis
 df <- df %>%
-  mutate(Transect_No. = factor(Transect_No., levels = as.character(seq(1, max_transect_no, 1))))
+ mutate(Transect_No. = factor(Transect_No., levels = transect_levels))
 
 # Reshape the data to long format (positons of stream measurements as rows instead of cols; to put them on x axis of plot)
 df_long <- df %>%
