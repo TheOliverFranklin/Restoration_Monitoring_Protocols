@@ -366,6 +366,8 @@ residuals.df <- df %>%
 
 Below we generate a quick visual of the depths and residual surfaces that were projected by the code. Take a look to ensure it matches your understanding of residual pools and look for potential errors (the figure is interactive, so zoom in if you have several plots). Try to identify some local depth minima that are within a pool (if present in your data), and compare these to the local depth minima that act as pool outlets - the shallower features at which residual surfaces begin. Remember that the residual surface slopes down in these figures as you progress upstream (right in the plots), which is to compensate for the fact that the true thalweg surface slopes down as you progress downstream.
 
+Note that, if you were not able to begin the survey downstream at a pool outlet, an artificial outlet has been generated. You will have the option to omit this entire first pool from subsequent analyses if deemed appropriate.
+
 ```{r visualise residual surfaces, echo = FALSE}
 # Ensure 'year' is ordered from oldest to youngest
 residuals.df$year <- factor(residuals.df$year, levels = sort(unique(residuals.df$year), decreasing = FALSE))
@@ -638,7 +640,7 @@ create_pool_summary_table <- function(residuals.df, custom_depth_threshold = NUL
 # this is a function. It does not actually produce a new dataframe yet. The next chunk will...
 ```
 
-## Subsetting Pools
+## Subsetting Pools by Depth
 
 So far we have identified all of the residual pools, but depending on your dataset some of the pools visualised above might look more like puddles. So to focus our summary statistics on pools that better align with what we consider biologically- and/or geomorphically-meaningful, we can use the metrics we just calculated to focus on a specific subset of deeper pools.
 
@@ -677,11 +679,25 @@ The reach mean of the pool maximum residual depths has been used as a proxy for 
 
 The proportional length of pools in the reach also has demonstrated positive relationships with coho, Chinook densities (Clark et al 2019). Bear in mind that there will always be nuance involved in the application and interpretation of habitat metrics. You must understand and predict, in an *a priori* fashion, what your restoration objectives are with respect to habitat: Does your reach need more pool of a certain depth? Is your reach lacking much-needed riffles? Presumably there are cases where the reach has too much pool habitat. These types of questions are best addressed with well-matched reference sites, but local knowledge and the scientific literature will also be of great help.
 
-We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length in residual pool, for your data:
+## Summary Statistics
+
+We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length in residual pool, for your data. 
+
+If your first pool in the sequence is not deemed to be meaningful or repeatable (i.e., an artificial pool outlet was generated and you feel you will be unable to repeat surveys from a consistent location), there is an option here to remove the first pool entirely. Note that if you omit pool 1 here, it will be omitted from all summary stats and inferential tests going forward (including for fines & aquatic veg).
+
+```{r omit first pool}
+# --- User option: include or omit pool 1 ---
+Pool1Omit <- FALSE   # set to TRUE to exclude pool 1
+```
 
 ```{r residual pool summary stats, echo = FALSE}
 # Function to calculate summary statistics for the subset of pools, grouped by Site and Year
-calculate_subset_summary <- function(pool_summary_df, residuals.df) {
+calculate_subset_summary <- function(pool_summary_df, residuals.df, Pool1Omit = FALSE) {
+  # If Pool1Omit is TRUE, filter out pool_id == 1
+  if (Pool1Omit) {
+    pool_summary_df <- pool_summary_df[pool_summary_df$pool_id != 1, ]
+  }
+  
   # Initialize a list to store the results for each Site-Year combination
   subset_summary_list <- list()
   
@@ -747,7 +763,8 @@ calculate_subset_summary <- function(pool_summary_df, residuals.df) {
   return(final_subset_summary_df)
 }
 
-subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals.df)
+# Run with user option on pool 1
+subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals.df, Pool1Omit)
 
 # Display the result as a table
 subset_summary_result <- subset_summary_result %>%
@@ -811,8 +828,15 @@ after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 
 ```
 
 ```{r categorise by before after, echo = FALSE}
-# Categorize years
+# Categorize years and incorporate Pool 1 inclusion/omission from above summary stats
 pool_summary_result <- pool_summary_result %>%
+  { 
+    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
+      filter(., pool_id != 1)
+    } else {
+      .
+    }
+  } %>%
   mutate(Time_Category = case_when(
     year %in% before_years ~ "Before",
     year %in% after_years ~ "After",
@@ -1460,7 +1484,7 @@ The longitudinal survey included presence/absence observations of fine sediment 
 Note that, while the previous metrics in this script use the 'custom depth' threshold to subset what are considered 'meaningful' pools, we recommend considering fine sediment relative to the full contingent of residual pools that the code has identified. Our rationale is that the fines metrics relate more closely to the mechanisms that can be responsible for making pools 'meaningful' (or not) in terms of fish habitat availability. If we were to look at the proportion of fines only in 'meaningful' (deep enough) pools, we might miss pools that are closer to being 'not pools' (i.e., recently filling-in or scouring of sediment). Of course, when pools are fully infilled with sediment they will not be detected as pools at all, but the ability to recognise when a pool is filling in (or scouring out) may be an important indicator of restoration success, or a trigger for adaptive management actions.
 
 ```{r fines, echo = FALSE}
-calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_threshold = NULL, use_sd_threshold = FALSE) {
+calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_threshold = NULL, use_sd_threshold = FALSE, Pool1Omit = FALSE) {
   # Ensure the residuals dataframe has 'Site' and 'year' columns for grouping
   if (!all(c("Site", "year") %in% colnames(residuals.df))) {
     stop("residuals.df must contain 'Site' and 'year' columns.")
@@ -1479,11 +1503,17 @@ calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_thr
     # Subset the residuals dataframe for the current Site and year
     subset_residuals <- residuals.df[residuals.df$Site == site & residuals.df$year == year, ]
     
-        if (nrow(subset_residuals) == 0 || all(is.na(subset_residuals$residual_depth))) {
-    message(paste("Skipping Site:", site, "Year:", year, 
-                  "- no valid residual depth data available."))
-    next
-}
+    if (nrow(subset_residuals) == 0 || all(is.na(subset_residuals$residual_depth))) {
+      message(paste("Skipping Site:", site, "Year:", year, 
+                    "- no valid residual depth data available."))
+      next
+    }
+    
+    # If Pool1Omit = TRUE, drop pool_id == 1
+    if (isTRUE(Pool1Omit)) {
+      subset_residuals <- subset_residuals[subset_residuals$pool_id != 1, ]
+    }
+    
     # Ensure the dataframe is sorted by distance within each pool
     subset_residuals <- subset_residuals[order(subset_residuals$pool_id, subset_residuals$distance), ]
     
@@ -1502,17 +1532,18 @@ calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_thr
     unique_pool_ids <- unique(subset_residuals$pool_id)
     for (pool_id in unique_pool_ids) {
       # Skip if pool_id is NA
-  if (is.na(pool_id)) {
-    next
-  }
+      if (is.na(pool_id)) {
+        next
+      }
+      
       # Subset data for the current pool
       pool_residuals <- subset_residuals[subset_residuals$pool_id == pool_id, ]
       
-       # Ensure there is data before calculating the maximum residual depth
-  if (nrow(pool_residuals) == 0 || all(is.na(pool_residuals$residual_depth))) {
-    message(paste("Skipping Pool:", pool_id, "Site:", site, "Year:", year, "- no valid residual depth data available."))
-    next
-  }
+      if (nrow(pool_residuals) == 0 || all(is.na(pool_residuals$residual_depth))) {
+        message(paste("Skipping Pool:", pool_id, "Site:", site, "Year:", year, "- no valid residual depth data available."))
+        next
+      }
+      
       # Calculate the maximum residual depth
       max_residual_depth <- max(pool_residuals$residual_depth, na.rm = TRUE)
       
@@ -1529,15 +1560,15 @@ calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_thr
       pool_residuals$segment_length <- NA
       
       # Calculate segment lengths
-      for (i in 1:nrow(pool_residuals)) {
-        if (i == 1) {
-          pool_residuals$segment_length[i] <- (pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2
-        } else if (i == nrow(pool_residuals)) {
-          pool_residuals$segment_length[i] <- (pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2
+      for (j in 1:nrow(pool_residuals)) {
+        if (j == 1) {
+          pool_residuals$segment_length[j] <- (pool_residuals$distance[j + 1] - pool_residuals$distance[j]) / 2
+        } else if (j == nrow(pool_residuals)) {
+          pool_residuals$segment_length[j] <- (pool_residuals$distance[j] - pool_residuals$distance[j - 1]) / 2
         } else {
-          pool_residuals$segment_length[i] <- 
-            ((pool_residuals$distance[i] - pool_residuals$distance[i - 1]) / 2) +
-            ((pool_residuals$distance[i + 1] - pool_residuals$distance[i]) / 2)
+          pool_residuals$segment_length[j] <- 
+            ((pool_residuals$distance[j] - pool_residuals$distance[j - 1]) / 2) +
+            ((pool_residuals$distance[j + 1] - pool_residuals$distance[j]) / 2)
         }
       }
       
@@ -1618,8 +1649,9 @@ fines_proportion_result <- calculate_fines_proportion(
   pool_data = pool_summary_result,   # 
   residuals.df = residuals.df,       # 
   custom_depth_threshold = custom_depth,  # Use custom threshold for filtering (will overwrite NULL / SD case)
-  use_sd_threshold = TRUE            # TRUE = SD is used when there is no custom_depth specified. 
-)
+  use_sd_threshold = TRUE,            # TRUE = SD is used when there is no custom_depth specified. 
+Pool1Omit = Pool1Omit
+  )
                                                                                                                                                            
 # Split the results by Site
 site_split <- split(fines_proportion_result, fines_proportion_result$Site)
@@ -1697,8 +1729,15 @@ Slightly nerdy bit, feel free to ignore: Beta regressions are capable of dealing
 We will generate a frequency plot of the fine proportion data, fit the Beta regression, and plot the frequency distribution of the residuals (which should be broadly symmetrical around zero) and their relationships to the fitted values (for which no clear relationship or heteroscedasticity should be evident). We will only export the results of the Beta regression to your output folder.
 
 ```{r fines data evaluating, echo = FALSE}
-#### add the before/after categories from previous input
+#### add the before/after categories and pool1omit value from previous input
 fines_proportion_result <- fines_proportion_result %>%
+ { 
+    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
+      filter(., pool_id != 1)
+    } else {
+      .
+    }
+  } %>%
   mutate(Time_Category = case_when(
     year %in% before_years ~ "Before",
     year %in% after_years ~ "After",
@@ -1786,8 +1825,7 @@ Aside from the above, in some cases it can also be difficult to assign proportio
 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿
 
 ```{r aquatic veg in pools, echo = FALSE}
-calculate_veg_proportion <- function(residuals.df, veg_column, custom_depth = NULL) {
-  # Validate that the vegetation column exists in the residuals dataframe
+calculate_veg_proportion <- function(residuals.df, veg_column, custom_depth = NULL, Pool1Omit = FALSE) {  # Validate that the vegetation column exists in the residuals dataframe
   if (!veg_column %in% colnames(residuals.df)) {
     stop(paste("The column", veg_column, "is not present in the residuals dataframe."))
   }
@@ -1809,6 +1847,16 @@ for (i in 1:nrow(unique_sites_years)) {
     message(paste("No data for Site:", site, "Year:", year, "- skipping."))
     next
   }
+  
+      # Drop pool 1 if Pool1Omit is TRUE
+    if (isTRUE(Pool1Omit)) {
+      subset_residuals <- subset_residuals[subset_residuals$pool_id != 1, ]
+    }
+  
+      if (nrow(subset_residuals) == 0) {
+      message(paste("All pools omitted for Site:", site, "Year:", year))
+      next
+      }
   
   # Determine the depth threshold (custom or SD)
   depth_threshold <- if (is.null(custom_depth)) {
@@ -1924,9 +1972,9 @@ custom_depth <- 0  # Replace with your desired threshold in metres, or set to NU
 
 ```{r Aquatic veg tables, echo = FALSE, message=FALSE}
 # Call the function with the custom depth threshold
-subveg_result <- calculate_veg_proportion(residuals.df, veg_column = "subveg", custom_depth = custom_depth)
-emergveg_result <- calculate_veg_proportion(residuals.df, veg_column = "emergveg", custom_depth = custom_depth)
-floatveg_result <- calculate_veg_proportion(residuals.df, veg_column = "floatveg", custom_depth = custom_depth)
+subveg_result <- calculate_veg_proportion(residuals.df, veg_column = "subveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
+emergveg_result <- calculate_veg_proportion(residuals.df, veg_column = "emergveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
+floatveg_result <- calculate_veg_proportion(residuals.df, veg_column = "floatveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
 
 # Extract "Total" rows for each table
 subveg_total <- subveg_result[subveg_result$pool_id == "Total", ]
@@ -1953,13 +2001,20 @@ Below we display the Beta regression model summaries for all vegetation categori
 ```{r aquatic veg inferentials, echo = FALSE}
 # Function to run Beta regression and diagnostics
 run_beta_regression <- function(data, response_var, dataset_name, summary_list) {
-  # Create the Time_Category
+  # Create the Time_Category and omit pool 1 if applied above
   data <- data %>%
-    mutate(Time_Category = case_when(
-      year %in% before_years ~ "Before",
-      year %in% after_years ~ "After",
-      TRUE ~ NA_character_
-    ))
+     { 
+    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
+      filter(., pool_id != 1)
+    } else {
+      .
+    }
+  } %>%
+  mutate(Time_Category = case_when(
+    year %in% before_years ~ "Before",
+    year %in% after_years ~ "After",
+    TRUE ~ NA_character_
+  ))
 
   # Filter sites with both time categories and remove "Total"
   filtered_data <- data %>%
