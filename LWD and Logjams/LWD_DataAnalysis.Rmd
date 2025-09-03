@@ -261,11 +261,11 @@ df <- df %>%
       TRUE ~ Stability
     ),
 
-    # Rootwad: default to "N" for NA, blank, or "-", then parse based on presence of 'p' or 'a'
+ # Rootwad: default to "N" for NA, blank, or "-", then parse based on presence of 'p' or 'a'
     Rootwad = case_when(
       is.na(Rootwad) | str_trim(Rootwad) %in% c("", "-") ~ "N",
-      str_detect(str_to_lower(Rootwad), "p") ~ "Y",
-      str_detect(str_to_lower(Rootwad), "a") ~ "N",
+      str_detect(str_to_lower(Rootwad), "^(p|y|yes|present)") ~ "Y",
+      str_detect(str_to_lower(Rootwad), "^(a|n|no|absent)") ~ "N",
       TRUE ~ Rootwad
     )
   )
