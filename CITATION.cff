@@ -1,14 +1,17 @@
 cff-version: 1.2.0
 title: Restoration Monitoring Protocols - DFO PSSI
 message: >-
-  If you use this software, please cite it using the
+  If you use this repository, please cite it using the
   metadata from this file.
-type: software
+type: field guidance and data analysis code
 authors:
   - given-names: Nicci
     family-names: Zargarpour
     email: nicci.zargarpour@dfo-mpo.gc.ca
+    name-particle: nicci
   - given-names: Oliver
     family-names: Franklin
     email: oliver.franklin@dfo-mpo.gc.ca
-date-released: 2025-09-12
+repository-code: >-
+  https://github.com/TheOliverFranklin/Restoration_Monitoring_Protocols.git
+date-released: '2025-09-12'
