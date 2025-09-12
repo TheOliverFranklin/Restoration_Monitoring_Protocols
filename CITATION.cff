@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 title: Restoration Monitoring Protocols - DFO PSSI
 message: >-
-  If you use this software, please cite it using the
+  If you use this repository, please cite it using the
   metadata from this file.
-type: software
+type: field guidance and data analysis code
 authors:
   - given-names: Nicci
     family-names: Zargarpour
