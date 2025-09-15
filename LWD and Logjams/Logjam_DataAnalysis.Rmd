@@ -156,7 +156,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Logjam/to_combine"
+data_dir <- "C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code/LWDJam"
 ```
 
 ```{r combine csv input files, echo=FALSE}
@@ -244,7 +244,7 @@ if (interactive()) {
   }
 } else {
   # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/LWD"
+  output_folder <- "C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code/LWDJam/Output"
   if (!dir.exists(output_folder)) {
     dir.create(output_folder, recursive = TRUE)
     message("Default output folder created: ", output_folder)
@@ -479,7 +479,7 @@ logjam_table<-tags$div(
     Site = colDef(name = "Site"),
     year = colDef(name = "Year"),
     Total_Jams = colDef(name = "Number of Logjams in Reach"),
-    Frequency_Jams = colDef(name = "Frequency of Logjams per 100 m", 
+    Frequency_Jams_per_100m = colDef(name = "Frequency of Logjams per 100 m", 
                            format = colFormat(digits = 1)),
     Avg_Piece_Jam = colDef(name = "Mean Number of LWD Pieces per Logjam (SD)", 
                            format = colFormat(digits = 1)),
