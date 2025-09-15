@@ -445,7 +445,7 @@ summary_table_jam <- logjam_data %>%
     #Total Number of jams
     Total_Jams = ifelse(all(is.na(Jam_ID)), 0, n()), # If Jam_ID for a site and date is NA, it will assign a zero for 'Total_jams', otherwise it will return the number of rows 'n()' for that group 
     #Frequency of jams (number of jams per 100 m stream length)
-    Frequency_Jams = n() / first(Reach_Length) * 100,
+    Frequency_Jams_per_100m = n() / first(Reach_Length) * 100,
     #Average number of pieces per jam 
     Avg_Piece_Jam = sprintf("%.2f (%.2f)", mean(LWD_No., na.rm = TRUE), sd(LWD_No., na.rm = TRUE)),
     #Average Height (m), na.rm = TRUE tells the function to remove any NA values in the data before performing the operation
@@ -479,7 +479,7 @@ logjam_table<-tags$div(
     Site = colDef(name = "Site"),
     year = colDef(name = "Year"),
     Total_Jams = colDef(name = "Number of Logjams in Reach"),
-    Frequency_Jams = colDef(name = "Frequency of Logjams per 100 m)", 
+    Frequency_Jams = colDef(name = "Frequency of Logjams per 100 m", 
                            format = colFormat(digits = 1)),
     Avg_Piece_Jam = colDef(name = "Mean Number of LWD Pieces per Logjam (SD)", 
                            format = colFormat(digits = 1)),
