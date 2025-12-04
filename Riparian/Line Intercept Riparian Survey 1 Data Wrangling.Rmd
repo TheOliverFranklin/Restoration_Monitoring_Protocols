@@ -1,0 +1,378 @@
+---
+title: "Line Intercept Riparian Survey 1 <br>Data Wrangling"
+author: "Oliver Franklin"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_download: true
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(fig.width=12, fig.height=9, echo = TRUE)
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman")}
+pacman::p_load(DT, tidyverse, abdiv, dplyr, ggplot2, purrr, htmlwidgets, lubridate, update=F)
+```
+
+```{r export functions, echo = FALSE}
+# functions to use for exporting results to output_folder (which is prompted in R when not in R environment)
+
+#export figure (pdf for static ggplot plots, html for interactive plotly plots)
+export_plot <- function(plot, filename) {
+  if (inherits(plot, "ggplot")) {
+    # Export ggplot as PDF
+    ggsave(
+      filename = file.path(output_folder, filename),
+      plot = plot,
+      device = "pdf",
+      width = 11,
+      height = 8.5
+    )
+  } else if (inherits(plot, "plotly")) {
+    # Ensure the filename has .html extension
+    html_filename <- file.path(output_folder, sub("\\.pdf$", ".html", filename))
+    # Export plotly as a **single self-contained** HTML file
+    saveWidget(
+      widget = plot, 
+      file = html_filename, 
+      selfcontained = TRUE  # 
+    )
+  } else {
+    stop("Unsupported plot type. Only ggplot and plotly objects are supported.")
+  }
+}
+
+# Function to save a table
+export_table <- function(table, filename) {
+  write.csv(
+    table,
+    file = file.path(output_folder, filename),
+    row.names = FALSE
+  )
+}
+
+# Function to save summary as txt
+export_summary <- function(summary_text, filename_base) {
+  # Ensure summary_text is a character vector (it should already be, but just in case)
+  summary_text <- as.character(summary_text)
+    # Save as .txt
+  txt_path <- file.path(output_folder, paste0(filename_base, ".txt"))
+  writeLines(summary_text, con = txt_path)
+}
+
+# Examples of exporting individual results:
+# Export a figure
+# export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
+# export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
+# 
+# # Exporting a table
+# summary_table <- summary(mtcars)
+# export_table(as.data.frame(summary_table), "summary_table.csv")
+# 
+# Example of exporting a summary
+# summary_text <- capture.output(summary(mtcars))
+# export_summary(summary_text, "summary")
+```
+
+```{r standardise column types, echo=F} 
+# a function that gets called for data import to standardize column types
+standardize_column_types <- function(df) {
+  
+  # Define the expected column types
+  column_types <- list(
+    Site = "character",
+    Date = "character",
+    Staff = "character",
+    Transect_ID = "character",
+    Transect_length = "numeric",
+    Reach_start_lat = "character",
+    Reach_start_long = "character",
+    Reach_end_lat = "character",
+    Reach_end_long = "character",
+    Bank = "character",
+    Species = "character",
+    Height_class = "character",
+    Start_location = "numeric",
+    End_location = "numeric",
+    Notes = "character",
+    plant_code = "character",
+    hydrophyte = "character",
+    invasive = "character"
+  )
+    # Loop through each column and convert it to the appropriate type
+  for (col in names(column_types)) {
+    expected_type <- column_types[[col]]
+    
+    # If the column exists in the dataframe, convert to the specified type
+    if (col %in% names(df)) {
+      if (expected_type == "numeric") {
+        df[[col]] <- as.numeric(df[[col]])
+      } else if (expected_type == "character") {
+        df[[col]] <- as.character(df[[col]])
+      }
+    }
+  }
+    return(df)
+}
+```
+
+Welcome to what is intended to be a simple and efficient analysis of the data that you collected for your restoration project using the field methods we provided. While our scripts should take a lot of the effort out of data processing, figure generating, and statistical testing, you and your partners must apply your expertise to interpret the outputs in the context of your project.
+
+You should be approaching data analysis with a set of established hypotheses, predictions, and plans for the various outcomes. If you are not familiar with the importance of *a priori* hypotheses and the dangers of data dredging, please spend some time reading up on these. Only once you have your hypotheses and predictions in mind (and ideally on paper) should you continue. We recommend revisiting your predictions and interpretations of possible outcomes before you run every single statistical test.
+
+# Guidance Format
+
+We have written these data analysis scripts in R markdown (.rmd files) and printed them as .html documents. As **Step 1** we recommend that you read through the .html files, which we printed using some example data. The .html files contain all the written guidance, but omit most of the underlying code. **Step 2** is to then open this file in both .html and .rmd formats, and begin processing your own data:
+
+- You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
+
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code in the .html file is hidden, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+
+- You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
+
+- You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
+
+- Note that the first time you use this code, you may only have one year of data. As such, any inferential tests ins the code will not be possible (they require comparisons among years and with a control/reference site). You may see error messages associated with the inferntial test failures, but do not worry - the appropriate summary statistics for your data should still be genereated.
+
+If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
+
+# Additional Required Data
+
+Before we upload your field data for analysis, there is an important step of providing standardised coding, and adding information on plant hydrophytic (wetland) and invasive statuses. You will do this in your favourite spreadsheet software following the steps below:
+
+## Plant Codes 
+
+- Plants are notorious for having a large number of common names, and periodic taxonomic changes are not uncommon. As such, to make your data comparable to data collected in different places, by different people, and/or in different years, for each of the plant occurrences you recorded, you should assign the correct plant code from the database downloadable from [BC Species Explorer](https://www.for.gov.bc.ca/hre/becweb/resources/codes-standards/standards-species.html). 
+
+  - In your spreadsheet software add to your field data a column named 'plant_code', and then sort the data by the Species column (the names you recorded in the field). Using the BC Species Explorer database, enter the plant codes for every species that you identified.
+  
+  - If you could not confidently ID particular plants at species level, the BC Species Explorer database includes higher taxonomic levels that can be used. Some examples for challenging families are: unknown sedge ("CYPERAC_"), unknown grass ("POACEAE_"), unknown rush ("JUNCACE_"). 
+  
+    - Note that if you return to your site in later years with more knowledge and can improve the ID, think carefully about the implications. If you took good enough photos or pressed specimens from earlier years, you can update the prior years to the same taxonomic levels. But typically it is safest to stick with the taxonomic level of the first year: If your whole survey area is 'unidentified sedge' your diversity metrics will appear low, but if you come back later and ID the same plants as 6 different sedge species, metrics will suggest a huge change in diversity when nothing may have actually changed in the field. Similarly, this could impact hydrophytic data (some sedge are obligate, some facultative wetland, some facultative etc.) and invasive data too. Be consistent and take notes that are available to future field staff.\
+  \
+  - You may have recorded notable occurrences that are not associated with a plant code in the BC Species Explorer, such as standing water, bare soil, or concrete. We refer to these as 'non-plant' data as a shorthand, but we realise that the options below do include some plants. If you are talented enough to ID moss, lichens, liverworts then you are welcome to do so (and we seriously envy you), but in general we do not think it is feasible for most people to do this, hence including those categories in the table below.\
+  
+For the 'non-plant' occurrences we ask that you assign values from the table below. Note that these codes include an '!' so that we can easily filter them for inclusion or exclusion in various tests. 
+
+
+| Feature                 | Code  | 
+|-------------------------|-------|
+| other anthropogenic item| !ANTH |
+| constructed berm/dyke  	| !BERM |
+| bare cobble             | !COBB |
+| concrete              	| !CONC |
+| coarse woody debris    	| !CWD  |
+| bare gravel             | !GRAV |
+| lichen or liverwort (if dominant or defining vegetative cover)     | !LILI |
+| moss (if dominant or defining vegetative cover)	| !MOSS |
+| other natural feature  	| !OTH  |
+| riprap                  | !RIPR |
+| exposed bedrock/boulder	| !ROCK |
+| bare sand               | !SAND |
+| saturated soils  	      | !SAT  |
+| bare soil               | !SOIL |
+| standing water        	| !WET  |
+
+## Hydrophyte and Invasive Status
+
+Even if it is not your primary objective now, we strongly recommend including hydrophytic and invasive status information: Floodplain connectivity, changing atmospheric conditions or flow regimes, and invasive plants all have the potential to take centre stage in restoration sites.
+
+- In your spreadsheet software, with data still sorted by the field-assigned Species column, add a column named 'invasive'. For any species that is considered invasive, add the letter 'I'. You can leave all other rows blank.
+
+- Add a column named 'hydrophyte'. For this column you should at a minimum specify which species are considered obligate (enter 'OBL' in the hydrophyte column), facultative wetland ('FACW'), and facultative ('FAC') plants. You can leave the other rows blank if you like. However, for more detailed analyses - that we may or may not have time to code - you may also want to specify which plants are facultative upland ('FACU'), and obligate upland ('UPL').
+
+  - Your determination of plant status should be consistent through time, and this is particularly important where you cannot confidently ID a plant to species level. Note clearly any decisions you make with regards to whether these plants are considered hydrophytes - for example, in streamside locations within the region containing the site, is it safe to assume that unidentified sedges are obligate hydrophytes? The most important factor is to record your decision and to be consistent over monitoring years.
+
+Both invasive status and hydrophyte status should be based on local knowledge if you are familiar with the species and the standard definitions for hydrophytic vegetation. If any potentially contentious decisions are made, they should be recorded such that future field crew can be consistent. If you are not experienced with wetland vegetation, you can look up most plants at [USDS Plant Database](https://plants.usda.gov/home):
+
+- Enter the plant name at the search box in the top left, and select common or scientific name. Once you are at the plant's page, select the 'wetland' tab, and read wetland status based on most appropriate Region for you (e.g., Alaska; or Western Mountains, Valleys, and Coast). Note that not all plant pages will have the wetland tab, and you may need to navigate to a subspecies (usually easiest using the Classification table at the bottom of the General tab).
+  
+# Data Wrangling
+
+Hopefully there will not be too much more you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
+
+The next step is to combine all of the data that will be compared into one dataframe. These analyses are intended for BACI (before-after control-impact) assessments, so the dataframe can contain data for the restoration site and control/reference sites, and will (ultimately) have data across multiple years.  Don't worry if you only have data from one site and/or one year at this point, we will still produce metrics and figures for it. If you were unable to collect data at control/reference sites you can still learn a lot about your restoration site using these analyses, but familiarise yourself with the limitations of interpreting changes (or absence of change) when you do not have a well-matched control/reference.
+
+## Before importing data
+
+Please remember to keep the column names consistent with those in the data entry form that we provided (otherwise you will have to alter all the column names in our code to match). Your transect length, start and end location measurements should be in metres.
+
+In general, your data should be able to differentiate where you surveyed but did not encounter any plants, versus where you did not survey. Each transect should be associated with at least one observation. For example, an unvegetated gravel deposit would be recorded as '!GRAV' with dimensions spanning the full transect length.
+
+## Data import
+
+You may have all of your data in one .csv file, or it may be in multiple .csv files (e.g., one per site and/or per year). If you have multiple .csv files, it is important to ensure that the column names and the formats of data entered (e.g. characters, numeric) are the same in all files. Our code should help aligning the formats of each column, but only if the column names are correct.
+
+Once you have checked your column names are correct, place your .csv file(s) in a dedicated folder on your computer (containing no other files but those you intend to analyse here). In the below chunk of code, specify the directory name of the folder containing your files (enter this in the quotation marks for data_dir <- " " below).
+
+``` {r specify raw data folder}
+# Specify the directory containing the raw data files
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Nathan Creek/Riparian/to_combine"
+```
+
+```{r combine csv input files, echo=FALSE}
+# List all CSV files in the directory
+csv_files <- list.files(data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+# Read and combine all CSV files into one dataframe
+df <- csv_files %>%
+  map(read.csv) %>%                    # Read each CSV file
+  map(~standardize_column_types(.)) %>% # Apply the standardization function to each dataframe
+  bind_rows() %>%                      # Combine the dataframes into one
+  filter(
+    !is.na(Site),                      # Remove rows with NA in the Site column
+    Site != "",                        # Remove rows with empty strings in the Site column
+    rowSums(is.na(.)) < ncol(.)        # Remove rows that are entirely NA
+  )
+```
+
+Let's take a look at the dataframe. 
+
+```{r view dataframe, echo = FALSE}
+datatable(
+  df,
+  rownames = FALSE,
+  options = list(
+    scrollX = TRUE,  # Enable horizontal scrolling
+    scrollY = "500px",  # Set the height of the scrollable window
+    paging = TRUE
+  )
+)
+```
+
+
+Take a look through the dataframe and ensure there are no errors and to explore unusual entries. In some places, you may have missing entries or 'NA', when a value of '0' is more appropriate.
+
+## Transect and Height Class Considerations
+
+There are several important considerations before we analyse your data, and you should decide and document these decisions now:
+
+- If you surveyed both banks at any of your transects, __do you consider the left and right bank as two sides of the same transect, or are they distinct samples?__ If they are two sides of the same transect, metrics such as cover would be calculated by summing data from both sides together. If they are distinct samples, left and right will each have their own metrics. Consider your hypotheses (e.g., do you expect change on one side in particular) and consider the implications for your data. If you consider the left and right banks as distinct transects, we will provide reach summary statistics for left and right banks separately. Ensure that you have established _a priori_ rationale justifying whether or not you treated banks differently.
+
+- Your data may include vegetation associated with multiple channels (different 'Site' names), or you may wish to exclude certain transects for the analyses. For example, the area expected to be impacted by restoration may have changed since you collected baseline data because the restoration plan changed. Consider whether all transects are representative of your reach, and whether you may have crossed over into a distinct habitat type. __Make note of any transects that you may need to exclude__, and ensure this is followed in the coming years.
+
+- In the field you collected data by height class categories. We consider these categories to be generally representative of different ecological functions and indicators, even for the same species. We feel it is worth considering and interpreting the density of (e.g.) red alder seedlings distinctly from the saplings, and distinctly from mature red alders. While the seedlings may help stabilise the soil somewhat, they are probably less effective at shading out invasive vegetation than a canopy tree. Information on changing densities of different height classes may also be reflective of natural recruitment. However, you may not be interested in this level of detail, and would prefer to combine the height class data such that you only have metrics at the species level. Note that combining height data at this point still retains some information regarding vertical structure (a multi-layer stand of canopy alder, saplings, and seedlings would have greater overlap and therefore greater cover metric values than a uniform stand of saplings, all else being equal). __Consider whether you wish to combine the height class canopies and focus only on differences among species__.
+
+Once you have considered the above, please amend the code below with your preferences:
+
+``` {r user considerations, echo = TRUE}
+#
+combine_left_right <- TRUE   # replace with FALSE to analyse banks separately
+sites_to_exclude <- c("GOOSE CREEK")  # leave empty: c() ; omit named sites. eg. c("Hatchery Channel", "Fish Creek")
+transects_to_exclude <- c("11", "12", "13") # leave empty: c() ; omit named transects. eg. c("1", "2") ...or c("1_Right", "2_Right", "1_Left") etc if L/R banks are to be treated separately
+combine_height_classes <- FALSE   # set TRUE to merge all height classes into one
+```
+
+``` {r process considerations, echo=FALSE}
+# filtering based on user specs
+df <- df %>%
+   mutate(Transect_ID = as.character(Transect_ID)) %>%
+  { if (!combine_left_right && "Bank" %in% names(.)) {
+      mutate(., Transect_ID = paste0(Transect_ID, "_", Bank))
+    } else .
+  } %>%
+  
+ { if (combine_height_classes && "Height_class" %in% names(.)) {
+      mutate(., Height_class = "combo")
+    } else .
+  } %>%
+  
+  { if (length(sites_to_exclude) > 0) filter(., !Site %in% sites_to_exclude) else . } %>%
+  
+  { if (length(transects_to_exclude) > 0) filter(., !Transect_ID %in% transects_to_exclude) else . }
+
+# confirmation message
+message("Rows remaining after filtering: ", nrow(df))
+```
+## Date format
+
+In case your data collection spanned more than one day in any one of your sampling years, we also isolate just the year from the date column. Depending on the formatting of your date, you may need to adjust the code below to match your date format (e.g., change the part that says 'dmy' to ymd, myd, dym, etc.):
+
+```{r extract year}
+df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
+df$year <- year(df$parsed_date)        # Extract the year
+```
+
+
+## Occurrence Magnitudes
+
+Since it will have value for many of the following analyses, we will calculate the 'occurrence magnitudes' for individual/clusters of plants and add this to the dataframe. The occurrence magnitude is a value assigned to each observation calculated as the difference between the start and end locations as measured along the tape. 
+
+Note that, by default, this value does not include the extents of vegetation that overhang the channel (i.e., negative start values). Later, if you choose to, you can include those extents in various analyses.
+
+```{r locations to magnitude, echo=FALSE}
+df$Start_location <- as.numeric(df$Start_location)
+df$End_location   <- as.numeric(df$End_location)
+df$occurrence.magnitude <- df$End_location - pmax(df$Start_location,0)# pmax to exclude overhanging vegetation from occurrence mag calc
+```
+
+# Transect Lengths
+
+Most surveys will use a standardised transect length (the distance the transect extends away from the channel) that is consistent across all transects. However, there may be circumstances in which this is not possible and it is also biologically/geomorphologically meaningful to have data with somewhat variable transect lengths. For example, where you survey a narrow flood bench with a variable distance between the channel (the start of the transect) and a steep bank that hosts a distinct change in vegetative community (the end of the transect). 
+
+The code below can be used to define the consistent transect length that you surveyed (enter value in metres at user_defined_transect_length, and ensure transect_length_from_data is FALSE) or, if you enter TRUE at transect_length_from_data, each transect length will be defined by the greatest measurement recorded at that transect.
+
+```{r specify transect length}
+# You can specify to obtain transect lengths from the data (can vary by transect), or use a predefined standard length
+transect_length_from_data <- FALSE   # Set TRUE to calculate from data, FALSE to use the user_defined_transect_length
+user_defined_transect_length <- 30       # Only used if transect_length_from_data is FALSE
+```
+``` {r transect length from data, echo=FALSE}
+df <- df %>%
+  group_by(Transect_ID) %>%
+  mutate(transect_length = if (transect_length_from_data) {
+                             max(End_location, na.rm = TRUE)
+                           } else {
+                             user_defined_transect_length
+                           }) %>%
+  ungroup()
+```
+
+# Export Data
+
+At this point, when running the code in RStudio, you will be prompted to specify a folder for the output. We recommend a dedicated folder, or set of folders, that will contain all outputs from these scripts. Some of the outputs (dataframes) will be needed in other scripts, but many (figures, results of statistical tests) will be for your reference or for sharing with others. When prompted you will need to enter the folder location (e.g. C:/Documents/Restoration_Monitoring_Protocols/data_tidier/). If your R environment is cleared between scripts, you will be prompted again to specify the location. As such, you can clear your workplace intentionally if you want each script's output in different folders.
+
+```{r Set File Export Location, echo = FALSE} 
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/Riparian"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+## Export Tidied Dataframe
+
+Now we know the location, we will export this dataframe to your output folder so that it can be used in future analyses.
+
+```{r df export, echo = FALSE}
+export_table(as.data.frame(df),"LIRS_dataframe.csv")
+```
+Check your file folder and the .csv file to see the data you exported. Then move on to *'Line Intercept Riparian Survey 2 Relative Abundance'*.
+
+### R and Package Version Information
+
+We provide the following information for the sake of reproducability. Some future updates may involve changes that impact the ability to run this script, so it is useful to know which versions we used so that you can continue to use it.
+
+```{r session info, echo = TRUE}
+sessionInfo()
+```

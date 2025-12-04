@@ -20,11 +20,11 @@ This folder contains the Line Intercept Riparian Survey package. The files, in t
 
 - xlsx: A field datasheet in modifiable format (you may not need to use this file, it is probably easier to print from the pdf above)
 
-- csv: TBC: We intend to upload data entry file templates after the summer field season
+- csv: TBC: We intend to upload data entry file templates ASAP
 
-- html file: We intend to upload this file after the summer field season. It will contain step by step guidance for data analysis. 
+- 4 html files: step by step guidance for data analysis. Contains some (mostly fabricated) example data
 
-- rmd file:  We intend to upload this file after the summer field season. Corresponding to the above html files, it will contain the R code and guidance.
+- 4 rmd files: corresponding to each html file, these contain the R code and guidance. To be used alongside the html to analyse the data you collected.
 
 
   ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>  ><>
