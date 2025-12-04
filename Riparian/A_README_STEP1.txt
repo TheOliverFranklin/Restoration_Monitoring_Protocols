@@ -20,7 +20,7 @@ This folder contains the Line Intercept Riparian Survey package. The files, in t
 
 - xlsx: A field datasheet in modifiable format (you may not need to use this file, it is probably easier to print from the pdf above)
 
-- csv: TBC: We intend to upload data entry file templates ASAP
+- csv: data entry sheet to prepare data from the field for analysis. There is a bit of desktop info we require at this stage (see the first html file - Line Intercept Riparian Survey 1 Data Wrangling - for more on plant codes, hydrophyte, and invasive status)
 
 - 4 html files: step by step guidance for data analysis. Contains some (mostly fabricated) example data
 

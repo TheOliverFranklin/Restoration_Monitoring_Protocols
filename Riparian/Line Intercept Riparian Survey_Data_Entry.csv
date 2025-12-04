@@ -1,0 +1,2 @@
+"DELETE THIS ENTIRE ROW BEFORE IMPORTING TO R. DO NOT CHANGE COLUMN NAMES. ROWS HERE CORRESPOND TO ROWS OF FIELD FORM (SPECIES-HEIGHT OBSERVATIONS WITH COVER MEASURES). YOU MUST ADD plant_code, hydrophye, AND invasive VALUES. SEE .html GUIDANCE DOCUMENT AND SORT BY Species COLUMN TO ENTER THESE VALUES.",,,,,,,,,,,,,,,,,
+Site,Date,Staff,Transect_ID,Transect_length,Reach_start_lat,Reach_start_long,Reach_end_lat,Reach_end_long,Bank,Species,Height_class,Start_location,End_location,Notes,plant_code,hydrophyte,invasive
