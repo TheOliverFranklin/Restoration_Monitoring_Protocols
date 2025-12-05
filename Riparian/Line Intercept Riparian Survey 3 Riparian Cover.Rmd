@@ -161,7 +161,7 @@ We will display the mean and sd values for each site and year below, and will ex
 ```{r cover per transect, echo=FALSE}
 total.cover <- cover.df %>%
   group_by(Site, year, Transect_ID) %>%
-  mutate(cover.per.m = occurrence.magnitude / transect_length) %>%  # cover in m/m
+  mutate(cover.per.m = occurrence.magnitude / Transect_length) %>%  # cover in m/m
   summarize(sum_cover_per_m = sum(cover.per.m, na.rm = TRUE), .groups = "drop")
 
 # Detect whether Left/Right banks treated separately
@@ -227,7 +227,7 @@ We will generate a figure per site-year showing density by height class and tran
 ```{r cover by height, echo = FALSE, warning = FALSE}
 cover.by.height <- cover.df %>%
   group_by(Site, year, Transect_ID, Height_class) %>%
-  mutate(cover.per.m = occurrence.magnitude / transect_length) %>%
+  mutate(cover.per.m = occurrence.magnitude / Transect_length) %>%
   summarise(sum_cover_per_m = sum(cover.per.m, na.rm = TRUE), .groups = "drop") %>%
   mutate(
     Height_class = dplyr::recode(Height_class,
@@ -473,7 +473,7 @@ mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_loc
 ```{r cover density by species, echo=FALSE, include = FALSE}
 # Calculate per-transect plant cover density (m/m)
 species.df <- cover.df %>%
-  mutate(cover.per.m = occurrence.magnitude / transect_length) 
+  mutate(cover.per.m = occurrence.magnitude / Transect_length) 
 
 # Aggregate cover by species, transect, and height class
 plant_prop_transect <- species.df %>%
