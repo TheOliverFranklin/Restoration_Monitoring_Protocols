@@ -322,7 +322,7 @@ user_defined_transect_length <- 30       # Only used if transect_length_from_dat
 ``` {r transect length from data, echo=FALSE}
 df <- df %>%
   group_by(Transect_ID) %>%
-  mutate(transect_length = if (transect_length_from_data) {
+  mutate(Transect_length = if (transect_length_from_data) {
                              max(End_location, na.rm = TRUE)
                            } else {
                              user_defined_transect_length
