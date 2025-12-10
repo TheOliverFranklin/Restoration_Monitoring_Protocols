@@ -99,6 +99,10 @@ standardize_column_types <- function(df) {
     hydrophyte = "character",
     invasive = "character"
   )
+  
+  # Columns to trim spaces and force uppercase
+  clean_cols <- c("hydrophyte", "plant_code", "invasive")
+  
     # Loop through each column and convert it to the appropriate type
   for (col in names(column_types)) {
     expected_type <- column_types[[col]]
@@ -109,10 +113,17 @@ standardize_column_types <- function(df) {
         df[[col]] <- as.numeric(df[[col]])
       } else if (expected_type == "character") {
         df[[col]] <- as.character(df[[col]])
+
+        # clean spaces from selected columsn
+                if (col %in% clean_cols) {
+          df[[col]] <- trimws(df[[col]])   # remove leading/trailing spaces
+          df[[col]] <- toupper(df[[col]])  # force uppercase
+        }
       }
     }
   }
-    return(df)
+  
+  return(df)
 }
 ```
 
@@ -209,7 +220,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Nathan Creek/Riparian/to_combine"
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Deadwood Creek/Riparian/to_combine"
 ```
 
 ```{r combine csv input files, echo=FALSE}
@@ -259,9 +270,9 @@ Once you have considered the above, please amend the code below with your prefer
 
 ``` {r user considerations, echo = TRUE}
 #
-combine_left_right <- TRUE   # replace with FALSE to analyse banks separately
-sites_to_exclude <- c("GOOSE CREEK")  # leave empty: c() ; omit named sites. eg. c("Hatchery Channel", "Fish Creek")
-transects_to_exclude <- c("11", "12", "13") # leave empty: c() ; omit named transects. eg. c("1", "2") ...or c("1_Right", "2_Right", "1_Left") etc if L/R banks are to be treated separately
+combine_left_right <- FALSE   # replace with FALSE to analyse banks separately
+sites_to_exclude <- c()  # leave empty: c() ; omit named sites. eg. c("Hatchery Channel", "Fish Creek")
+transects_to_exclude <- c() # leave empty: c() ; omit named transects. eg. c("1", "2") ...or c("1_Right", "2_Right", "1_Left") etc if L/R banks are to be treated separately
 combine_height_classes <- FALSE   # set TRUE to merge all height classes into one
 ```
 
@@ -295,7 +306,6 @@ df$parsed_date <- dmy(df$Date)  # Convert the date column to Date format
 df$year <- year(df$parsed_date)        # Extract the year
 ```
 
-
 ## Occurrence Magnitudes
 
 Since it will have value for many of the following analyses, we will calculate the 'occurrence magnitudes' for individual/clusters of plants and add this to the dataframe. The occurrence magnitude is a value assigned to each observation calculated as the difference between the start and end locations as measured along the tape. 
@@ -303,12 +313,22 @@ Since it will have value for many of the following analyses, we will calculate t
 Note that, by default, this value does not include the extents of vegetation that overhang the channel (i.e., negative start values). Later, if you choose to, you can include those extents in various analyses.
 
 ```{r locations to magnitude, echo=FALSE}
+# ensuring that the start < end (happens sometimes in field, especially with negative values for overhanging)
+df <- df %>%
+  rowwise() %>%
+  mutate(vals = list(sort(c(Start_location, End_location)))) %>%
+  mutate(Start_location = vals[1],
+         End_location   = vals[2]) %>%
+  select(-vals) %>%
+  ungroup()
+
 df$Start_location <- as.numeric(df$Start_location)
 df$End_location   <- as.numeric(df$End_location)
-df$occurrence.magnitude <- df$End_location - pmax(df$Start_location,0)# pmax to exclude overhanging vegetation from occurrence mag calc
+# adjust negative values of both Start and End to 0 for the calculation only
+df$occurrence.magnitude <- pmax(df$End_location, 0) - pmax(df$Start_location, 0)# pmax to exclude overhanging vegetation from occurrence mag calc
 ```
 
-# Transect Lengths
+## Transect Lengths
 
 Most surveys will use a standardised transect length (the distance the transect extends away from the channel) that is consistent across all transects. However, there may be circumstances in which this is not possible and it is also biologically/geomorphologically meaningful to have data with somewhat variable transect lengths. For example, where you survey a narrow flood bench with a variable distance between the channel (the start of the transect) and a steep bank that hosts a distinct change in vegetative community (the end of the transect). 
 

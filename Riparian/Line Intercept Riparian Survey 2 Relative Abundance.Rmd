@@ -139,9 +139,15 @@ include_overhanging <- FALSE   # change to TRUE to keep overhanging extents of v
 ```{r cover.df with updated user preferences, echo=FALSE}
 plant.df <- df %>%
   { if (!include_non_plants) filter(., !str_starts(plant_code, "!")) else . } %>%
-mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_location
-    } else {End_location - pmax(Start_location, 0)
-    })
+  {
+    if (include_overhanging) {
+      # keep all rows, even with negative End_location. Will convert to positive values if overhanging veg comes from beside transect, no value on land (Start plus End both negative values)
+      mutate(., occurrence.magnitude = abs(End_location - Start_location))
+    } else {
+      # keep rows but adjust negative End_location and Start_location to 0 for calculating occurrence.mag (lots of zeros but keeps plants in data)
+      mutate(.,occurrence.magnitude = pmax(End_location, 0) - pmax(Start_location, 0))
+    }
+  }
 ```
 
 We start by considering the relative abundance for every species-height combination that was recorded in your surveys (i.e., you would get relative abundance for canopy redcedar, a separate relative abundance for seedling redcedar, etc.). Note that we generate relative abundance for each species-height combination in two separate ways: 
@@ -244,8 +250,8 @@ plant_prop_transect <- plant_prop_transect %>%
   filter(!is.na(Height_class)) %>%
   mutate(
     BankGroup = case_when(
-      grepl("Left", Transect_ID, ignore.case = TRUE)  ~ "Left",
-      grepl("Right", Transect_ID, ignore.case = TRUE) ~ "Right",
+      grepl("(Left|L)", Transect_ID, ignore.case = TRUE)  ~ "Left",
+      grepl("(Right|R)", Transect_ID, ignore.case = TRUE) ~ "Right",
       TRUE ~ "Combined"
     ),
     Height_class = factor(Height_class, levels = c("L","M","C","combo")),
@@ -342,19 +348,26 @@ The mean and sd values above are calculated across _all_ transects for every spe
 
 The mean and sd values for species-height observations are useful for comparing how particular focal species have changed through time and with reference to a control site (where available). While very interesting to see how different species have changed, these summary statistics can be misleading if you scour through them and make speculative interpretations without _a priori_ hypotheses. As such, we recommend you limit your interpretation of the above to the few species that you had specific (haha) expectations for. 
 
-The below figure may serve as a useful communication and interpretation tool. The values we display are means of species-height class relative abundance as a proportion of the transect's total vegetation __in the relevant height class__, and correspond to the values presented in the table above. Note that we do not generate a figure for the species-height class occurrences as a proportion of __all vegetation per transect__, because this is less intuitive to interpret visually (if species-height is the numerator) or could obscure dominance for species spanning multiple height class (if species alone is the numerator).
+The below figure may serve as a useful communication and interpretation tool, or it may look like a complete mess. The values we display are means of species-height class relative abundance as a proportion of the transect's total vegetation __in the relevant height class__, and correspond to the values presented in the table above. Note that we do not generate a figure for the species-height class occurrences as a proportion of __all vegetation per transect__, because this is less intuitive to interpret visually (if species-height is the numerator) or could obscure dominance for species spanning multiple height class (if species alone is the numerator).
 
 Depending on the plant community at your sites, the following figure might look a bit overwhelming. While we display and export the stacked bar charts, we will also export to your output folder (but not display here) a series of bar charts that display the same data but may be a bit easier to interpret.
 
 ```{r relative abundance figure, echo = FALSE}
 base_palette <- c(
-  "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#882255", "#FFFF33", 
+  "#E41A4C", "#377EB8", "#4DAF2A", "#984EA3", "#882255", "#FFFF33", 
+  "#A65628",  "#17BECF", "#999999", "#66C2A7", "#FC8D62", "#8DA0CB", 
+  "#E78AC3", "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3", "#1B1E77", 
+  "#D95F02", "#7570B3", "#8C564B", "#BCBD22", "#7F7F7F", 
+  "#AEC7E8", "#FFBB78", "#98DF8A", "#F781BF","#C5B0D5", "#F7B6D2", 
+  "#DBDB8D", "#9EDAE5", "#FF7F00","#C49C94", "#F0E442", "#56B4E9", 
+  "#009E73", "#D55E00", "#CC79A7",  "#119793", "#44AA09",  "#E41A4C", 
+  "#377EB8", "#9DAF4A", "#984EA3", "#882255", "#FFFF33", 
   "#A65628",  "#17BECF", "#999999", "#66C2A5", "#FC8D62", "#8DA0CB", 
   "#E78AC3", "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3", "#1B9E77", 
   "#D95F02", "#7570B3", "#8C564B", "#BCBD22", "#7F7F7F", 
   "#AEC7E8", "#FFBB78", "#98DF8A", "#F781BF","#C5B0D5", "#F7B6D2", 
   "#DBDB8D", "#9EDAE5", "#FF7F00","#C49C94", "#F0E442", "#56B4E9", 
-  "#009E73", "#D55E00", "#CC79A7",  "#117733", "#44AA99"
+  "#009E73", "#D55E00", "#CC79A7",  "#113733", "#44AA99"
 )
 
 total_composition <- summary_heightclass %>%
@@ -481,10 +494,10 @@ The interpretation of these two \(D\) metrics will differ: If we consider (e.g.,
 plant.df <- plant.df %>%
   group_by(Site, year) %>%
   mutate(
-    SiteYear_has_LR = any(grepl("Left|Right", Transect_ID, ignore.case = TRUE)),
+    SiteYear_has_LR = any(grepl("Left|L|Right|R", Transect_ID, ignore.case = TRUE)),
     BankGroup = case_when(
-      SiteYear_has_LR & grepl("Left", Transect_ID, ignore.case = TRUE)  ~ "Left",
-      SiteYear_has_LR & grepl("Right", Transect_ID, ignore.case = TRUE) ~ "Right",
+      SiteYear_has_LR & grepl("(Left|L)", Transect_ID, ignore.case = TRUE)  ~ "Left",
+      SiteYear_has_LR & grepl("(Right|R)", Transect_ID, ignore.case = TRUE) ~ "Right",
       TRUE ~ "All"
     )
   ) %>%

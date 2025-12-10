@@ -152,8 +152,8 @@ hdf <- df %>% # split banks if treated separately
   filter(!grepl("^!", plant_code)) %>% #filter out non-plant cover, which start with "!"
   mutate(
     BankGroup = case_when(
-      grepl("_Left$", Transect_ID) ~ "Left",
-      grepl("_Right$", Transect_ID) ~ "Right",
+      grepl("_Left$|_L$", Transect_ID) ~ "Left",
+      grepl("_Right$|_R$", Transect_ID) ~ "Right",
       TRUE ~ "Combined"
     )
   )
@@ -257,8 +257,7 @@ rel_abund <- hdf %>%
 # add cleaner labels for transects
 rel_abund <- rel_abund %>%
   mutate(
-    Transect_num = gsub("(_Left|_Right)$", "", Transect_ID),     # remove Left/Right suffix
-    Transect_num = as.numeric(Transect_num),
+    Transect_num = as.numeric(str_extract(Transect_ID, "\\d+")), # grabs just numeric part (problematic if >1 numbers, e.g. "T12_1_R")
     Transect_label = paste0("T", Transect_num),
     Transect_label = factor(Transect_label, levels = paste0("T", sort(unique(Transect_num))))
   )
@@ -308,9 +307,15 @@ include_overhanging <- FALSE   # change to TRUE to keep overhanging extents of v
 ```{r cover.df with user preferences again, echo=FALSE}
 cover.df <- df %>%
   { if (!include_non_plants) filter(., !str_starts(plant_code, "!")) else . } %>%
-mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_location
-    } else {End_location - pmax(Start_location, 0)
-    })
+  {
+    if (include_overhanging) {
+      # keep all rows, even with negative End_location. Will convert to positive values if overhanging veg comes from beside transect, no value on land (Start plus End both negative values)
+      mutate(., occurrence.magnitude = abs(End_location - Start_location))
+    } else {
+      # keep rows but adjust negative End_location and Start_location to 0 for calculating occurrence.mag (lots of zeros but keeps plants in data)
+      mutate(.,occurrence.magnitude = pmax(End_location, 0) - pmax(Start_location, 0))
+    }
+  }
 ```
 
 The table below displays the mean and sd values for the reach (separated by bank if you previously specified that) of the cover density of the three hydrophyte categories in metres of hydrophyte per metre of transect. Some of these values may be greater than 1.0 due to the multiple height classes involved, overlap of plants, and the potential inclusion of vegetation that overhangs the channel.
@@ -319,8 +324,8 @@ The table below displays the mean and sd values for the reach (separated by bank
 cover.df <- cover.df %>%
   mutate(
     BankGroup = case_when(
-      grepl("_Left$", Transect_ID)  ~ "Left",
-      grepl("_Right$", Transect_ID) ~ "Right",
+      grepl("_Left$|_L$", Transect_ID)  ~ "Left",
+      grepl("_Right$|_R$", Transect_ID) ~ "Right",
       TRUE                          ~ "Combined"
     )
   )
@@ -460,8 +465,8 @@ inv.df <- df %>%
   filter(!grepl("^!", plant_code)) %>%  # keep only plants
   mutate(
     BankGroup = case_when(
-      grepl("_Left$", Transect_ID)  ~ "Left",
-      grepl("_Right$", Transect_ID) ~ "Right",
+      grepl("_Left$|_L$", Transect_ID)  ~ "Left",
+      grepl("_Right$|_R$", Transect_ID) ~ "Right",
       TRUE                          ~ "Combined"
     ),
     invasive_flag = tolower(invasive) %in% c("i", "inv", "invasive")
@@ -537,8 +542,7 @@ inv_rel <- inv.df %>%
 #Add  T1–T10 labels 
 inv_rel <- inv_rel %>%
   mutate(
-    Transect_num = gsub("(_Left|_Right)$", "", Transect_ID),
-    Transect_num = as.numeric(Transect_num),
+    Transect_num = as.numeric(str_extract(Transect_ID, "\\d+")), # grabs just numeric part (problematic if >1 numbers, e.g. "T12_1_R")
     Transect_label = paste0("T", Transect_num),
     Transect_label = factor(Transect_label, levels = paste0("T", sort(unique(Transect_num))))
   )
@@ -588,9 +592,15 @@ include_overhanging <- FALSE   # change to TRUE to keep overhanging extents of v
 ```{r inv.df with user preferences, echo=FALSE}
 inv.df <- df %>%
   { if (!include_non_plants) filter(., !str_starts(plant_code, "!")) else . } %>%
-mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_location
-    } else {End_location - pmax(Start_location, 0)
-    })
+  {
+    if (include_overhanging) {
+      # keep all rows, even with negative End_location. Will convert to positive values if overhanging veg comes from beside transect, no value on land (Start plus End both negative values)
+      mutate(., occurrence.magnitude = abs(End_location - Start_location))
+    } else {
+      # keep rows but adjust negative End_location and Start_location to 0 for calculating occurrence.mag (lots of zeros but keeps plants in data)
+      mutate(.,occurrence.magnitude = pmax(End_location, 0) - pmax(Start_location, 0))
+    }
+  }
 ```
 
 Our next table dispalys the mean and sd value for invasive vegatation cover density (m per m of transect).
@@ -599,8 +609,8 @@ Our next table dispalys the mean and sd value for invasive vegatation cover dens
 inv.df <- inv.df %>%
   mutate(
     BankGroup = case_when(
-      grepl("_Left$", Transect_ID)  ~ "Left",
-      grepl("_Right$", Transect_ID) ~ "Right",
+      grepl("_Left$|_L$", Transect_ID)  ~ "Left",
+      grepl("_Right$|_R$", Transect_ID) ~ "Right",
       TRUE                          ~ "Combined"
     ),
     invasive_flag = tolower(invasive) %in% c("i", "inv", "invasive")
@@ -667,19 +677,28 @@ The next table provides metrics regarding the overhanging vegetation that may ha
 df_over <- df %>%
   mutate(
     BankGroup = case_when(
-      grepl("_Left$", Transect_ID)  ~ "Left",
-      grepl("_Right$", Transect_ID) ~ "Right",
+      grepl("_Left$|_L$", Transect_ID)  ~ "Left",
+      grepl("_Right$|_R$", Transect_ID) ~ "Right",
       TRUE                          ~ "Combined"
     )
   )
 
 # total overhanging cover per transect
-# Overhanging vegetation defined as Start_location < 0, will include abs. value of Start_location (i.e. from the transect zero to end of overhang, not the entire plant)
+# Overhanging vegetation defined as Start_location < 0, will include abs. value of Start_location (i.e. from the transect zero to end of overhang, not the entire plant; OR between Start and End location if both negative.)
 overhang_transect <- df_over %>%
+  mutate(
+    overhang_mag = case_when(
+      # Case 1: both negative → absolute difference
+      Start_location < 0 & End_location < 0 ~ abs(End_location - Start_location),
+      # Case 2: start negative, end >= 0 → magnitude is abs(start)
+      Start_location < 0 & End_location >= 0 ~ abs(Start_location),
+      TRUE ~ 0
+    )
+  ) %>%
   group_by(Site, year, Transect_ID, BankGroup) %>%
   summarise(
-    total_overhang = sum(abs(Start_location[Start_location < 0]), na.rm = TRUE),
-    overhang_present = any(Start_location < 0),
+    total_overhang   = sum(overhang_mag, na.rm = TRUE),
+    overhang_present = any(overhang_mag > 0),
     .groups = "drop"
   )
 
@@ -736,7 +755,6 @@ export_table(as.data.frame(overhang_summary_display), "Overhanging vegetation su
 ```
 
 The next table also provides some summary information regarding the types of vegetation that overhang the channel - potentially useful in understanding which vegetation is most successful in this role for your site.
-
 
 
 ```{r overhang species, echo =FALSE}
@@ -811,7 +829,7 @@ datatable(
   escape = FALSE,
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Species Overhanging the Channel within 1 m of Bankfull Elevation"
+    "Plant Species Overhanging the Channel"
   ),
   rownames = FALSE,
   options = list(
@@ -836,9 +854,13 @@ In the above table we have speculatively included some metrics that might be of 
 
 These may be of use in determining which species can fill this role in your particular habitat or area. 
 
-In contrast, we generated a metric that attempts to isolate the tendency, at your site, of that given plant species to overhang the stream channel: 
+We also generated a metric that attempts to isolate the tendency, at your site, of that given plant species to overhang the stream channel: 
+- Probability of overhang. This metric is the probability (0 to 1) that, if this plant species is present at your site within 2 horizontal metres of the channel, it will also be overhanging the channel. 
 
-- Probability of overhang. This metric is the probability (0 to 1) that, if this plant species is present at your site within 2 horizontal metres of the channel, it will also be overhanging the channel. This metric might be useful in adaptive management of riparian planting, to inform which plants should be favoured closer to the channel, if providing overhanging vegetation to the aquatic ecosystem is a priority.
+This metric may prove useful in adaptive management of riparian planting at your site, or for informing future efforts in similar habitats. The metric intends to inform which plants should be favoured closer to the channel, if providing overhanging vegetation to the aquatic ecosystem is a priority. It requires a couple of caveats:
+
+- The metric considers the presence/absence of _any part_ of a species' cover less than 2 m from the bank  (we did not record rooting locations of plants in the field). 
+- You will likely have relatively small sample sizes. Consider the number of transects at which a species overhangs alongside its probability to be overhanging.
 
 # Inferential Tests
 

@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(fig.width=12, fig.height=9, echo = TRUE)
 if (!requireNamespace("pacman", quietly = TRUE)) {
   install.packages("pacman")}
-pacman::p_load(DT, tidyverse, abdiv, dplyr, ggplot2, purrr, htmlwidgets, lubridate, viridis,update=F)
+pacman::p_load(DT, tidyverse, abdiv, htmlwidgets, viridis,update=F)
 ```
 
 
@@ -139,9 +139,15 @@ include_overhanging <- FALSE   # change to TRUE to keep overhanging extents of v
 ```{r cover.df with user preferences, echo=FALSE}
 cover.df <- df %>%
   { if (!include_non_plants) filter(., !str_starts(plant_code, "!")) else . } %>%
-mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_location
-    } else {End_location - pmax(Start_location, 0)
-    })
+  {
+    if (include_overhanging) {
+      # keep all rows, even with negative End_location. Will convert to positive values if overhanging veg comes from beside transect, no value on land (Start plus End both negative values)
+      mutate(., occurrence.magnitude = abs(End_location - Start_location))
+    } else {
+      # keep rows but adjust negative End_location and Start_location to 0 for calculating occurrence.mag (lots of zeros but keeps plants in data)
+      mutate(.,occurrence.magnitude = pmax(End_location, 0) - pmax(Start_location, 0))
+    }
+  }
 ```
 
 ## Riparian Vegetation Cover Density
@@ -165,14 +171,14 @@ total.cover <- cover.df %>%
   summarize(sum_cover_per_m = sum(cover.per.m, na.rm = TRUE), .groups = "drop")
 
 # Detect whether Left/Right banks treated separately
-has_banks <- any(grepl("Left|Right", total.cover$Transect_ID, ignore.case = TRUE))
+has_banks <- any(grepl("Left|L|Right|R", total.cover$Transect_ID, ignore.case = TRUE))
 
 if (has_banks) {
   total.cover <- total.cover %>%
     mutate(
       BankGroup = case_when(
-        grepl("Left", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
-        grepl("Right", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
+        grepl("(Left|L)", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
+        grepl("(Right|R)", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
         TRUE ~ "Combined"
       )
     )
@@ -253,12 +259,12 @@ cover.by.height <- cover.by.height %>%
   )
 
 # detect if banks treated separately
-if (any(grepl("Left|Right", cover.by.height$Transect_ID, ignore.case = TRUE))) {
+if (any(grepl("Left|L|Right|R", cover.by.height$Transect_ID, ignore.case = TRUE))) {
   cover.by.height <- cover.by.height %>%
     mutate(
       BankGroup = case_when(
-        grepl("Left", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
-        grepl("Right", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
+        grepl("(Left|L)", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
+        grepl("(Right|R)", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
         TRUE ~ "Combined"
       )
     )
@@ -277,7 +283,7 @@ if (any(grepl("Left|Right", cover.by.height$Transect_ID, ignore.case = TRUE))) {
 cover.by.height <- cover.by.height %>%
   group_by(Site,year) %>%
   mutate(
-    Transect_num = as.numeric(sub("(_Left|_Right)$", "", Transect_ID)), # numeric part
+    Transect_num = as.numeric(str_extract(Transect_ID, "\\d+")), # grabs just numeric part (problematic if >1 numbers, e.g. "T12_1_R")
     Transect_label = paste0("T", Transect_num)
   ) %>%
   # Make Transect_ID a factor in numeric order
@@ -395,14 +401,14 @@ cover_table_all <- cover.by.height %>%
   pivot_wider(names_from = Height_class, values_from = sum_cover_per_m, values_fill = 0)
 
 # Detect banks
-has_banks <- any(grepl("Left|Right", cover_table_all$Transect_ID, ignore.case = TRUE))
+has_banks <- any(grepl("Left|L|Right|R", cover_table_all$Transect_ID, ignore.case = TRUE))
 
 if (has_banks) {
   cover_table_all <- cover_table_all %>%
     mutate(
       BankGroup = case_when(
-        grepl("Left", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
-        grepl("Right", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
+        grepl("(Left|L)", Transect_ID, ignore.case = TRUE) ~ "Left Bank",
+        grepl("(Right|R)", Transect_ID, ignore.case = TRUE) ~ "Right Bank",
         TRUE ~ "Combined"
       )
     )
@@ -465,9 +471,15 @@ include_overhanging <- FALSE   # change to TRUE to keep overhanging extents of v
 ```{r cover.df with updated user preferences, echo=FALSE}
 cover.df <- df %>%
   { if (!include_non_plants) filter(., !str_starts(plant_code, "!")) else . } %>%
-mutate(occurrence.magnitude = if (include_overhanging) {End_location - Start_location
-    } else {End_location - pmax(Start_location, 0)
-    })
+  {
+    if (include_overhanging) {
+      # keep all rows, even with negative End_location. Will convert to positive values if overhanging veg comes from beside transect, no value on land (Start plus End both negative values)
+      mutate(., occurrence.magnitude = abs(End_location - Start_location))
+    } else {
+      # keep rows but adjust negative End_location and Start_location to 0 for calculating occurrence.mag (lots of zeros but keeps plants in data)
+      mutate(.,occurrence.magnitude = pmax(End_location, 0) - pmax(Start_location, 0))
+    }
+  }
 ```
 
 ```{r cover density by species, echo=FALSE, include = FALSE}
@@ -532,8 +544,8 @@ The mean and sd density values for species/features by height cover across trans
 plant_prop_transect_full_bank <- plant_prop_transect_full %>%
   mutate(
     Bank = case_when(
-      str_detect(Transect_ID, "Left") ~ "Left",
-      str_detect(Transect_ID, "Right") ~ "Right",
+      str_detect(Transect_ID, "Left|L") ~ "Left",
+      str_detect(Transect_ID, "Right|R") ~ "Right",
       TRUE ~ NA_character_
     )
   )
