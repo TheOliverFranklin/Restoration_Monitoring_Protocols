@@ -701,3 +701,11 @@ Wallerstein N.P. and Thorne C.R. (2004). Influence of large Woody debris on morp
 
 Wohl E. and Goode J.R. (2008). Wood dynamics in headwater streams of the Colorado Rocky Mountains. Water Resources Research 44: W09429.
 
+
+### R and Package Version Information
+
+We provide the following information for the sake of reproducability. Some future updates may involve changes that impact the ability to run this script, so it is useful to know which versions we used so that you can continue to use it.
+
+```{r session info, echo = TRUE}
+sessionInfo()
+```

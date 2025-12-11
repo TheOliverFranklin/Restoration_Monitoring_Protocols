@@ -2415,3 +2415,12 @@ Mossop, B. and Bradford, M.J., 2006. Using thalweg profiling to assess and monit
 Robison, E.G., 1998. Reach scale sampling metrics and longitudinal pattern adjustment of small streams. PhD Thesis. Oregon State University.
 
 Stack, W.R., 1988. Factors influencing pool morphology in Oregon coastal streams. MSc Thesis. Oregon State University
+
+
+### R and Package Version Information
+
+We provide the following information for the sake of reproducability. Some future updates may involve changes that impact the ability to run this script, so it is useful to know which versions we used so that you can continue to use it.
+
+```{r session info, echo = TRUE}
+sessionInfo()
+```

@@ -130,11 +130,13 @@ We have written these data analysis scripts in R markdown (.rmd files) and print
 
 - You will notice the .rmd file contains a lot of R code. It should not be necessary for you to edit (or even understand) the vast majority of the code. However, there are points throughout the document (displayed as text visible in both .rmd and .html files) at which we prompt you to enter data or make decisions regarding parameters. At these points you will follow the instructions to make small edits to the code. The code that needs editing is also usually displayed in the .html document.
 
-- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code is hidden in the .html file, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
+- We recommend having both the .rmd file open in RStudio, and the .html document open in a separate window. Although most of the code in the .html file is hidden, the documents are otherwise the same. You should use the .html document to guide you through step-by-step, rather than scrolling up and down in RStudio.
 
 - You will need some basic understanding of R to use these scripts (e.g., one of many free self-paced online intro courses). We recommend installing [R](https://cran.rstudio.com/) and [RStudio](https://posit.co/download/rstudio-desktop/), and using the latter for viewing and modifying the .rmd file. If you are daunted by R, we think [Swirl](https://swirlstats.com/students.html) is a great learning resource that lets you learn R interactively in the software itself.
 
 - You will work through the document from top to bottom and run the code chunks one by one as you encounter them. It is important that you run the code in the order it is presented. As you follow the instructions in RStudio, the results (figures, summaries of statistical tests etc.) will be displayed. The important results are also exported to a folder that you will be prompted to specify.
+
+- Note that the first time you use this code, you may only have one year of data. As such, any inferential tests in the code will not be possible (they require comparisons among years and with a control/reference site). You may see error messages associated with the inferential test failures, but do not worry - the appropriate summary statistics for your data should still be generated.
 
 - Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
 
@@ -364,3 +366,11 @@ export_table(as.data.frame(df),"Long_dataframe.csv")
 Check your file folder and the .csv files to see the data you exported. Then move on to *'Longitudinal Survey 2 Water Depths'*.
 
 
+
+### R and Package Version Information
+
+We provide the following information for the sake of reproducability. Some future updates may involve changes that impact the ability to run this script, so it is useful to know which versions we used so that you can continue to use it.
+
+```{r session info, echo = TRUE}
+sessionInfo()
+```

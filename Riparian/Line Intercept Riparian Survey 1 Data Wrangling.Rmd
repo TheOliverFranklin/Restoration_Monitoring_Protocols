@@ -145,7 +145,7 @@ We have written these data analysis scripts in R markdown (.rmd files) and print
 
 - Unless indicated otherwise in the text, you must run all of the code chunks. To ensure you don't miss any chunks, you can use the 'run all chunks above' button in RStudio (grey triangle pointing down to green line) before running a chunk of interest. 
 
-- Note that the first time you use this code, you may only have one year of data. As such, any inferential tests ins the code will not be possible (they require comparisons among years and with a control/reference site). You may see error messages associated with the inferntial test failures, but do not worry - the appropriate summary statistics for your data should still be genereated.
+- Note that the first time you use this code, you may only have one year of data. As such, any inferential tests in the code will not be possible (they require comparisons among years and with a control/reference site). You may see error messages associated with the inferential test failures, but do not worry - the appropriate summary statistics for your data should still be generated.
 
 If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
 

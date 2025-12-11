@@ -809,3 +809,10 @@ export_plot(HUplots, "Shannon Index and Pool-Riffle Ratio.pdf")
 
 
 
+### R and Package Version Information
+
+We provide the following information for the sake of reproducability. Some future updates may involve changes that impact the ability to run this script, so it is useful to know which versions we used so that you can continue to use it.
+
+```{r session info, echo = TRUE}
+sessionInfo()
+```
