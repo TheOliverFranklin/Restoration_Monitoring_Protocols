@@ -140,32 +140,6 @@ We have written these data analysis scripts in R markdown (.rmd files) and print
 
 If all of this looks daunting, don't worry. R is a very popular language and many people have remarkable levels of expertise that they are usually happy to share.
 
-```{r Set File Export Location, echo = FALSE}
-# this code requests an output folder location in the R console (interactively, readline)
-# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
-if (interactive()) {
-  while (!exists("output_folder") || !dir.exists(output_folder)) {
-    output_folder <- readline(prompt = "Specify the output folder: ")
-    if (!dir.exists(output_folder)) {
-      tryCatch({
-        dir.create(output_folder, recursive = TRUE)
-        message("Created folder: ", output_folder)
-      }, error = function(e) {
-        message("Invalid folder. Please try again.")
-        output_folder <- NULL
-      })
-    }
-  }
-} else {
-  # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/StreamCanopy"
-  if (!dir.exists(output_folder)) {
-    dir.create(output_folder, recursive = TRUE)
-    message("Default output folder created: ", output_folder)
-  }
-}
-```
-
 # Data Wrangling
 
 The first step in analysing data is to ensure the data is correctly organised and cleaned for processing. Hopefully there will not be too much you need to do manually, but there are often quirks in datasets, and taking the time to understand / correct them now will save you time in future.
@@ -209,14 +183,6 @@ It may be necessary to subset within this dataframe if, e.g., you included more 
 # df <- subset(df, Site %in% c("Hatchery Channel", "Brousseau Channel")) 
 
 # if you included multiple channels in your .csv files, in the above line you can select only data that corresponds to the channels of interest. Simply replace the channels within the brackets with the channels you wish to select. Then, remove the # from the start of the line (anything in a line after # is not considered code, so will not run. If you have no subsetting, there should be a # before df <- subset)
-```
-## Survey direction
-
-This code generates a plot that illustrates canopy cover across transects and along the surveyed area. To ensure the plot is oriented correctly, please indicate whether transect 1 is at the upstream or downstream extent of the survey, by editing the below code chunk:
-
-```{r survey direction}
-# --- User input: specify whether Transect 1 is upstream or downstream ---
-Transect1Location <- "upstream"   # options: "upstream" or "downstream" (include quotation marks)
 ```
 
 ## Date format
@@ -265,11 +231,81 @@ convert_na <- function(df, columns) {
 
 df <- convert_na(df, c("Left_Bank", "Middle_Left", "Middle_Right", "Middle_Upstream", "Middle_Downstream", "Right_Bank"))
 ```
+
+## Survey direction
+
+This code generates a plot that illustrates canopy cover across transects and along the surveyed area. To ensure the plot is oriented intuitively, please indicate whether transect 1 is at the upstream or downstream extent of the survey, by editing the below code chunk. 
+
+Note that you must follow Steps 1 and 2 in the below code if you have only one year of data, or if your survey direction was consistent across all sites and years that will be analysed today. If your survey direction was not consistent across all site years, complete Steps 1 and 3 in the below code.
+
+```{r survey direction}
+# User input required:
+
+# ---------- Step 1: change the below 'TRUE' to 'FALSE' if the direction of your survey was not consistent across all sites and years analysed in this session
+consistent_direction <- TRUE   # If this remains 'TRUE', specify the direction at Step 2. If you enter 'FALSE' go to Step 3.
+
+if (consistent_direction) {
+  global_direction <- "downstream"   # ----------  Step 2: specify "upstream" or "downstream"  (include quotation marks). Then there are no more user inputs for you in this section.
+  
+  survey_direction <- df %>%
+    distinct(Site, year) %>%
+    mutate(Transect1Location = global_direction)
+  
+} else {
+  # ----------  Step 3: List all site-year combinations in the data to be analysed in this session, as well as the location of Transect 1 as "upstream" or "downstream"  (include quotation marks)
+  
+  survey_direction <- tibble::tribble(
+    ~Site,   ~year, ~Transect1Location,
+    "Mayse", 2024,  "upstream",
+    "Mayse", 2025,  "upstream",
+    "Raven Left", 2024,  "downstream",
+    "Raven Left", 2025,  "upstream"
+    # add more rows for extra Site-years, and dont forget the comma for the penultimate line
+  )
+}
+```
+
+## Output Folder
+
+At this point, when running the code in RStudio, you will be prompted to specify a folder for the outputs (figures, tables etc.). We recommend a dedicated folder that will contain all outputs from this session, so that they can be easily distinguished from other sites or years in which data is analysed. When prompted you will need to enter the folder location, without any quotation marks 
+(e.g., C:/Documents/Restoration_Monitoring_Protocols/data_tidier/Site_Date). 
+
+```{r Set File Export Location, echo = FALSE}
+# this code requests an output folder location in the R console (interactively, readline)
+# code will also check if the script is running interactively, if not (e.g. if you are knitting) it will use the default folder (update if needed)
+if (interactive()) {
+  while (!exists("output_folder") || !dir.exists(output_folder)) {
+    output_folder <- readline(prompt = "Specify the output folder: ")
+    if (!dir.exists(output_folder)) {
+      tryCatch({
+        dir.create(output_folder, recursive = TRUE)
+        message("Created folder: ", output_folder)
+      }, error = function(e) {
+        message("Invalid folder. Please try again.")
+        output_folder <- NULL
+      })
+    }
+  }
+} else {
+  # Specify a default folder for non-interactive mode (e.g., knitting)
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/StreamCanopy"
+  if (!dir.exists(output_folder)) {
+    dir.create(output_folder, recursive = TRUE)
+    message("Default output folder created: ", output_folder)
+  }
+}
+```
+
+
+
 # Stream Canopy Cover
 
 Now we can create some figures and summary metrics, and run inferential tests to aide interpretation of the effects of your restoration project on stream canopy cover.
 
-Your data were collected on a scale of 0 - 17, but we will convert this to percentage (0-100) to aide interpretation, and will produce a heatmap plot with a tile for each measurement taken.
+Your data were collected on a scale of 0 - 17, but we will convert this to percentage (0-100) to aide interpretation, and will produce a heatmap plot with a tile for each measurement taken. 
+
+Note that the transects in this figure are oriented based on your previously-specified survey direction, and are displayed with upstream at the bottom and downstream at the top. For example, if at site A your 'Transect 1' was downstream, it will be at the top of the plot.
+
 
 ```{r percent and plot data, fig.width = 6, fig.height = 10,echo = FALSE}
 # Convert the raw values (0-17) to percentages (0-100)
@@ -283,24 +319,22 @@ df <- df %>%
     Right_Bank_percent = (Right_Bank / 17) * 100
   )
 
-# Convert Transect_No. to numeric temporarily to find max value
-max_transect_no <- max(as.numeric(as.character(df$Transect_No.)), na.rm = TRUE)
-
-# Set the order of Transect_No. depending on prior input
-if (Transect1Location == "upstream") {
-  transect_levels <- as.character(seq(1, max_transect_no, 1))   # 1 at top
-} else if (Transect1Location == "downstream") {
-  transect_levels <- as.character(seq(max_transect_no, 1, -1))  # 1 at bottom
-} else {
-  stop("Transect1Location must be 'upstream' or 'downstream'")
-}
-
-# Convert Transect_No. back to a factor with full range for consistent y-axis
-df <- df %>%
- mutate(Transect_No. = factor(Transect_No., levels = transect_levels))
+# add survey_direction table so each Site-year has intuitive direction
+df2 <- df %>%
+  left_join(survey_direction, by = c("Site", "year")) %>%
+ group_by(Site, year) %>%
+  mutate(
+    max_transect_no = max(as.numeric(as.character(Transect_No.)), na.rm = TRUE),
+    Transect_plot_order = if (first(Transect1Location) == "upstream") {
+      as.numeric(as.character(Transect_No.))
+    } else {
+      max_transect_no - as.numeric(as.character(Transect_No.)) + 1
+    }
+  ) %>%
+  ungroup()
 
 # Reshape the data to long format (positons of stream measurements as rows instead of cols; to put them on x axis of plot)
-df_long <- df %>%
+df_long <- df2 %>%
   pivot_longer(cols = c(Left_Bank_percent, Middle_Left_percent, Middle_Upstream_percent, 
                         Middle_Downstream_percent, Middle_Right_percent, Right_Bank_percent),
                names_to = "Position",
@@ -319,14 +353,14 @@ df_long <- df_long %>%
 gn_colors <- rev(sequential_hcl(7, palette = "Greens"))
 
 # Create the heatmap with BuGn colors
-heatmap_plot <- ggplot(df_long, aes(x = Position, y = Transect_No., fill = Percent_Cover)) +
+heatmap_plot <- ggplot(df_long, aes(x = Position, y = Transect_plot_order, fill = Percent_Cover)) +
   geom_tile(color = "white", width = 1, height = 1) +  # Adjust tile size: taller and thinner
   scale_fill_gradientn(colors = gn_colors,  
                        values = scales::rescale(c(0, 0.25, 0.5, 0.75, 1)), 
                        name = "Canopy %", na.value = "grey90") +  
   scale_x_discrete(labels = position_labels) +  # Custom x-axis labels
-  scale_y_discrete(expand = expansion(mult = c(0, 0))) +  # Prevent extra spacing in y-axis
-  labs(x = "Stream Position", y = "Transect Number", title = "Stream Canopy Cover by \nSpherical Densiometer Measure") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0)),breaks = NULL,labels = NULL) + # suppress y axis labels (incompatible if surveys conducted in different directions)
+  labs(x = "Stream Position", y = expression("Transect Order: Upstream " %->% " Downstream"), title = "Stream Canopy Cover by \nSpherical Densiometer Measure") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1),  # Rotate x-axis labels 
         panel.grid.major = element_blank(),
@@ -344,6 +378,7 @@ export_plot(heatmap_plot, "Stream Canopy Cover Heatmap.pdf")
 # Print the heatmap
 print(heatmap_plot)
 ```
+
 
 Because vegetation is often patchy, unless there are drastic differences among sites/years, no clear pattern may be discernible in the above figure. We will also look at summary metrics to compare the sites and/or years. We generate the mean and standard deviation for:
 
