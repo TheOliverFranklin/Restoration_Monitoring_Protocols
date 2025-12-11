@@ -2,9 +2,9 @@
 
 ## Standardised guidance for monitoring and assessment of restoration activities
 
-This repository contains a number of folders, each of which is a 'monitoring package' that contains step-by-step guidance to collect, process, and analyse data relevant to fish habitat, with a particular focus on salmonids. We hope to provide support through these time-consuming steps, to reduce the time and cost you need to commit to monitoring and understanding the effects of your restoration project.
+This repository contains a number of folders, each of which is a 'monitoring package' that contains step-by-step guidance to collect, process, and analyse data relevant to fish habitat, with a particular focus on salmonids. These resources should support you by reducing the time and cost you need to commit to monitoring, enable you to identify and fix issues early with adaptive management, and allow you to understand the actual effects of your restoration project.
 
-*This repository is currently being built*. For now, we have a few monitoring packages that are most appropriate for use in wadeable streams. More monitoring packages will be added as soon as we have developed and tested them.
+*This repository is currently being built*. For now, we have several monitoring packages that are most appropriate for use in wadeable streams. More monitoring packages will be added as soon as we have developed and tested them.
 
 The general steps are:
 
