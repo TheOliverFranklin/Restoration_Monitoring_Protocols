@@ -88,7 +88,7 @@ if (interactive()) {
   }
 } else {
   # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/Longitudinal"
   if (!dir.exists(output_folder)) {
     dir.create(output_folder, recursive = TRUE)
     message("Default output folder created: ", output_folder)
@@ -141,12 +141,11 @@ ggplot_plot<-ggplot(standard.df, aes(x = distance, y = -1 * Thalweg_Depth_m, col
     axis.text = element_text(size = 10),   # Adjust axis label sizes
     legend.position = "none"               # Remove the legend
   )
-plotly_plot<-ggplotly(ggplot_plot) 
-plotly_plot
 
-# Export figure as both static and interactive
+ggplot_plot
+
+# Export figure 
 export_plot(ggplot_plot, "Thalweg Water Depth by Distance Upstream.pdf")
-export_plot(plotly_plot, "Thalweg Water Depth by Distance Upstream.html")
 ```
 
 The plots above should allow some insight into differences in depth variation among your reaches and/or years. 
@@ -210,7 +209,7 @@ variability_stats <- standard.df_subsampled %>%
 # View the variability statistics
 DT::datatable(
   variability_stats,
-  caption = "Thalweg Depth Variability Metrics by Site and Year",
+  caption = "Thalweg Depth Variability Metrics",
   rownames = FALSE,   # Hide row numbers
   options = list(
     pageLength = 10,  # Number of rows per page
@@ -220,7 +219,7 @@ DT::datatable(
   DT::formatRound(columns = c("SD", "CV", "MSE"), digits = 3)  # Round specific numeric columns to 3 decimal places
 
 # Export table
-export_table(as.data.frame(variability_stats), "Depth Variability by Site-Year.csv")
+export_table(as.data.frame(variability_stats), "Depth Variability Metrics.csv")
 ```
 
 The simple plot below visually contrasts the mean and standard deviation for multiple years and/or multiple sites (where available). Remember that, since water depth is flow dependent, focus primarily on interpreting the standard deviation (the bar magnitude) rather than the mean (the vertical location of the bar/mean).

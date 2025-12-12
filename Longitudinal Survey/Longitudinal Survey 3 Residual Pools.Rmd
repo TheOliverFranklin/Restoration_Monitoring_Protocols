@@ -408,12 +408,12 @@ gg<- ggplot(residuals.df, aes(x = distance)) +
     strip.text.y = element_text(angle =90),  
     panel.spacing = unit(1, "lines")  # Adjust space between panels
   )
-interactive_plot <- ggplotly(gg)
-interactive_plot
+
+gg
 
 # Export a figure (commented out in favour of below figure)
 # export_plot(gg, "Thalweg Water Depth and Residual Surface.pdf")
-# export_plot(interactive_plot, "Thalweg Water Depth and Residual Surface.html")
+
 ```
 
 # 'Meaningful' Pools
@@ -503,12 +503,10 @@ gg<-ggplot(residuals.df, aes(x = distance)) +
   ) +
   facet_grid(Site ~ year, scales = "fixed")
 
-interactive_plot <- ggplotly(gg)
-interactive_plot
+gg
 
 # Export a figure
 export_plot(gg, "Depth and Residual Surface - Pools IDd.pdf")
-export_plot(interactive_plot, "Depth and Residual Surface - Pools IDd.html")
 ```
 
 The above figure should show a series of distinct pools and is exported to your output folder. Don't worry if the shading cuts off before the pool's upstream extent, this is just an artefact associated with my limited figure-plotting abilities. The important thing to note is that the calculations below will integrate the full area beneath the residual surface for each pool.
@@ -523,7 +521,7 @@ The code now calculates the following metrics for each residual pool:
 
 - Sagittal area.
 
-Sagittal refers to a plane that divides a body into left and right, so imagine a two-dimensional vertical screen extending downstream all along the thalweg, separating river left from river right. Within each residual pool, the sagittal area corresponds to the surface area of that screen. Too abstract? Take a look at the above figure again: Each of the shaded areas corresponds to the sagittal area for that particular residual pool - sagittal area integrates each depth measurement over the length of the pool. Although this may not be as intuitive as pool volume, it requires fewer assumptions than will be necessary to generate estimates of pool volume (i.e., regarding cross-sectional channel shape of pools at zero flow, wetted widths). Because fewer assumptions are required, and because it easily corresponds to 2D visualisations like the one above, we recommend using sagittal area rather than volume for a metric tracking changes in pool habitat (though we will also calculate volume later).
+Sagittal refers to a plane that divides a body into left and right, so imagine a two-dimensional vertical screen extending downstream all along the thalweg, separating river left from river right. Within each residual pool, the sagittal area corresponds to the surface area of that screen. Too abstract? Take a look at the above figure again: Each of the shaded areas corresponds to the sagittal area for that particular residual pool - sagittal area integrates each depth measurement over the length of the pool. Although this may not be as intuitive as pool volume, it requires fewer assumptions than will be necessary to generate estimates of pool volume (i.e., regarding cross-sectional channel shape of pools at zero flow). Because fewer assumptions are required, and because it easily corresponds to 2D visualisations like the one above, we recommend using sagittal area rather than volume for a metric tracking changes in pool habitat (though we will also calculate volume later).
 
 ```{r sagittal area, max depths, pool lengths, echo = FALSE}
 create_pool_summary_table <- function(residuals.df, custom_depth_threshold = NULL) {
@@ -577,21 +575,25 @@ create_pool_summary_table <- function(residuals.df, custom_depth_threshold = NUL
       # Initialize variable to accumulate area for this pool
       sagittal_area <- 0
       
-      # Iterate through the dataframe for this pool and calculate the area
-      for (i in 1:(nrow(pool_data) - 1)) {  # loop to avoid out-of-bounds index
-        residual_depth <- pool_data$residual_depth[i]
-        
-        # Skip the iteration if residual depth is NA 
+      n <- nrow(pool_data)
+      
+    # Only run the loop if the pool has at least 2 rows
+    if (nrow(pool_data) >= 2) {
+      for (i in 1:(nrow(pool_data) - 1)) {
+       residual_depth <- pool_data$residual_depth[i]
+    
+       # Skip the iteration if residual depth is NA 
         if (is.na(residual_depth)) {
-          next  # Skip to the next iteration if residual depth is NA
+          next
         }
-        
+       
         # Calculate the spacing (distance) between the current and following points
         spacing <- abs(pool_data$distance[i + 1] - pool_data$distance[i])
         
         # Add to the area if residual depth is greater than 0
         sagittal_area <- sagittal_area + (residual_depth * spacing)
       }
+    }
       
       # Handle the last row contribution to sagittal area
       last_row <- pool_data[nrow(pool_data), ]
@@ -681,23 +683,66 @@ The proportional length of pools in the reach also has demonstrated positive rel
 
 ## Summary Statistics
 
-We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length in residual pool, for your data. 
+We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length-in-residual-pool, for your data. But before we look at summary statistics at the pool level, we need to know if you want to include the pool at the very start of your survey.
 
-If your first pool in the sequence is not deemed to be meaningful or repeatable (i.e., an artificial pool outlet was generated and you feel you will be unable to repeat surveys from a consistent location), there is an option here to remove the first pool entirely. Note that if you omit pool 1 here, it will be omitted from all summary stats and inferential tests going forward (including for fines & aquatic veg).
+The first pool in the sequence is potentially not meaningful for your study and/or may not be repeatable, for example if you were unable to start your survey at a genuine pool outlet / riffle crest.  In our code we generated an artificial pool outlet so that the initial pool metrics can be calculated anyway, but we recommend only including the artificially-truncated first pool in the following analyses if you are confident you can repeat future surveys at the same consistent location. Note that if you decide to omit the first pool in the following code, it will be omitted from all summary statistics and inferential tests going forward (including for fines & aquatic veg).
+
+Enter your decision to omit or include the first pool in the chunk of code below. Note that you must follow Steps 1 and 2 in the below code if you have only one year of data, or if your decision regarding Pool 1 was consistent across all sites and years that will be analysed today. If your decision for that first pool was not consistent across all sites and years, complete Steps 1 and 3 in the below code. Our default, if you alter nothing, will be to keep the first pool in the analyses.
+
 
 ```{r omit first pool}
-# --- User option: include or omit pool 1 ---
-Pool1Omit <- FALSE   # set to TRUE to exclude pool 1
+# --- User input required: Pool 1 inclusion or omission
+
+# ---------- Step 1: change the below 'TRUE' to 'FALSE' if your decision about Pool 1 is not consistent across all sites and years analysed in this session
+consistent_pool1_rule <- FALSE   # If this remains 'TRUE', go to Step 2. 
+                                # If you enter 'FALSE' go to Step 3.
+
+if (consistent_pool1_rule) {
+  global_pool1_omit <- FALSE    # ---------- Step 2: set to TRUE to exclude Pool 1 from analyses (across all sites and years where present),
+                                # or set to FALSE to include Pool 1 across the board.
+  
+  pool1_settings <- df %>%
+    distinct(Site, year) %>%
+    mutate(Pool1Omit = global_pool1_omit)
+  
+} else {
+  # ---------- Step 3: List all site-year combinations in the data to be analysed, as well as whether Pool 1 should be omitted (TRUE) or included (FALSE).
+  
+  pool1_settings <- tibble::tribble(
+    ~Site,               ~year,  ~Pool1Omit,
+    "Fish Trap Channel", 2025,  TRUE,
+    "Fish Trap Channel", 2026,  TRUE,
+    "Fish Free Channel", 2025,  FALSE,
+    "Fish Free Channel", 2026,  FALSE
+    # add more rows for extra Site-years, and don’t forget the comma for the penultimate line
+  )
+}
+
+pool1_settings<-pool1_settings %>%
+  mutate(year = as.character(year))
+
+#df <- df %>%
+#  left_join(pool1_settings, by = c("Site", "year")) %>%
+#  filter(!(Pool1Omit & pool_id == 1))   # drop pool 1 rows where Pool1Omit == TRUE
 ```
+
+# up to here
+
+
+
 
 ```{r residual pool summary stats, echo = FALSE}
 # Function to calculate summary statistics for the subset of pools, grouped by Site and Year
-calculate_subset_summary <- function(pool_summary_df, residuals.df, Pool1Omit = FALSE) {
-  # If Pool1Omit is TRUE, filter out pool_id == 1
-  if (Pool1Omit) {
-    pool_summary_df <- pool_summary_df[pool_summary_df$pool_id != 1, ]
-  }
+calculate_subset_summary <- function(pool_summary_df, residuals.df, pool1_settings) {
   
+   # Join the pool1_settings (Site, year, Pool1Omit) to the pool_summary_df
+  pool_summary_df <- pool_summary_df %>%
+    left_join(pool1_settings, by = c("Site", "year"))
+  
+   # Filter out pool_id == 1 only where Pool1Omit == TRUE
+  pool_summary_df <- pool_summary_df %>%
+    filter(!(Pool1Omit & pool_id == 1)) 
+
   # Initialize a list to store the results for each Site-Year combination
   subset_summary_list <- list()
   
@@ -764,7 +809,7 @@ calculate_subset_summary <- function(pool_summary_df, residuals.df, Pool1Omit = 
 }
 
 # Run with user option on pool 1
-subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals.df, Pool1Omit)
+subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals.df, pool1_settings)
 
 # Display the result as a table
 subset_summary_result <- subset_summary_result %>%
@@ -783,6 +828,7 @@ datatable(
 # Export table
 export_table(as.data.frame(subset_summary_result), "Reach Summary Stats for Pools by Site and Year.csv")
 ```
+
 These above statistics should be useful for tracking changes over time, or comparing reference / control reaches. Because they are all based on residual depths, they are flow-independent. 
 
 Total sagittal area and proportion of the reach length in residual pool should be compared between years and/or sites, and you can interpret whether the changes are in the predicted direction and of a meaningful magnitude. Since these two metrics have one value per reach, the metrics themselves cannot be evaluated statistically (unless you have a large number of reaches/years), however a directional change over time that aligns with your predictions is obviously quite a good sign. 
@@ -823,20 +869,16 @@ Enter your before and after years in the below code, you may have more than one 
 
 ```{r define before after}
 # Define "Before" and "After" years
-before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
-after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+before_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2026) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
 ```
 
 ```{r categorise by before after, echo = FALSE}
 # Categorize years and incorporate Pool 1 inclusion/omission from above summary stats
 pool_summary_result <- pool_summary_result %>%
-  { 
-    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
-      filter(., pool_id != 1)
-    } else {
-      .
-    }
-  } %>%
+  left_join(pool1_settings, by = c("Site", "year")) %>%
+  # Drop pool 1 only for site-years where Pool1Omit == TRUE
+  filter(!(Pool1Omit & pool_id == 1)) %>%
   mutate(Time_Category = case_when(
     year %in% before_years ~ "Before",
     year %in% after_years ~ "After",
@@ -1126,8 +1168,12 @@ If you took wetted width measurements at transects along the reach, you can use 
 
 Considering changes in (coarsely-estimated) pool volume can be of interest due to the potential for natural processes to alter both the longitudinal and cross-sectional heterogeneity of a stream. For example, perhaps we are anticipating a narrower wetted channel with deeper pools, and want to explore what this means for pool volume. However, as suggested by the coarse assumptions we made for this calculation, interpret results with caution. 
 
+
 ```{r pool volumes, echo = FALSE}
-calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
+calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df, pool1_settings) {
+pool_summary_df <- pool_summary_df %>%
+    left_join(pool1_settings,by = c("Site", "year"))
+    
   # Initialize a list to store results for each site-year combination
   pool_volumes_list <- list()
   
@@ -1136,12 +1182,11 @@ calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
   
   # Iterate over each Site-Year group
   for (group_name in names(grouped_pool_summary)) {
-    # Get the current group
+
     group <- grouped_pool_summary[[group_name]]
-    
-    # Extract the site and year
     site <- unique(group$Site)
     year <- unique(group$year)
+    pool1omit <- unique(group$Pool1Omit)
     
     # Check if site or year are invalid
     if (length(site) != 1 || length(year) != 1 || is.na(site) || is.na(year)) {
@@ -1160,6 +1205,11 @@ calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
     
     # Get the subset of pool IDs for this group
     subset_pool_ids <- as.numeric(group$pool_id)  # Convert to numeric if necessary
+    
+    # Apply Pool1Omit rule: drop pool_id == 1 if flagged
+    if (isTRUE(pool1omit)) {
+      subset_pool_ids <- subset_pool_ids[subset_pool_ids != 1]
+    }
     
     # Ensure the dataframe is sorted by distance
     site_year_data <- site_year_data[order(site_year_data$distance), ]
@@ -1214,14 +1264,21 @@ calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
       # Store the volume for this pool
       pool_volumes[[as.character(pool_id)]] <- pool_volume
     }
-    
+
+ # Right before building the data frame
+vols <- unlist(pool_volumes)
+
+pool1omit <- if (length(pool1omit) == 0) NA else pool1omit[1]
+
     # Convert the results into a dataframe for the current Site-Year group
-    pool_volumes_df <- data.frame(
-      pool_id = names(pool_volumes),
-      pool_volume_m3 = unlist(pool_volumes),
-      Site = site,
-      year = year
-    )
+n_pools <- length(unlist(pool_volumes))
+pool_volumes_df <- data.frame(
+  pool_id       = names(pool_volumes),
+  pool_volume_m3 = unlist(pool_volumes),
+  Site          = rep(site, n_pools),
+  year          = rep(year, n_pools),
+  stringsAsFactors = FALSE
+)
     
     # Append the result for the current group to the list
     pool_volumes_list[[group_name]] <- pool_volumes_df
@@ -1234,7 +1291,7 @@ calculate_pool_volumes_for_sites_years <- function(df, pool_summary_df) {
 }
 
 # Use pool_summary_result from the previous step to get the subset of pool IDs
-pool_volumes_result <- calculate_pool_volumes_for_sites_years(residuals.df, pool_summary_result)
+pool_volumes_result <- calculate_pool_volumes_for_sites_years(residuals.df, pool_summary_result, pool1_settings)
 
 # Display the result as a table
 pool_volumes_result <- pool_volumes_result %>%
@@ -1253,6 +1310,7 @@ datatable(
 # Export table
 export_table(as.data.frame(pool_volumes_result), "Residual Pool Volume Estimates.csv")
 ```
+# up to here. adding the pool1omit logic. Takes time. need to also look through scripts 4 and 5 in case it causes issue
 
 The above table lists the volume estimates for each of the 'meaningful' subset of residual pools, and this table is also exported to your output folder. Next we will display and export a table with some key summary statistics for the reach: Total volume of residual pools, and the mean and standard deviation residual volume of pools.
 
