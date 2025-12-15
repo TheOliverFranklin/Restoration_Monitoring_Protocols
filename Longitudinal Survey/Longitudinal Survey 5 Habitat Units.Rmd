@@ -91,7 +91,7 @@ if (interactive()) {
   }
 } else {
   # Specify a default folder for non-interactive mode (e.g., knitting)
-  output_folder <- "~/Git/Core Monitoring/standardised protocols/data_tidier/Longitudinal"
+  output_folder <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_tidier/Longitudinal"
   if (!dir.exists(output_folder)) {
     dir.create(output_folder, recursive = TRUE)
     message("Default output folder created: ", output_folder)
@@ -205,7 +205,8 @@ for (site_year in unique(paste(residuals.df$Site, residuals.df$year))) {
         y = 0.01,
         yend = 0.01,
         line = list(color = habitat_color_map[hu], width = 20),
-        name = hu
+        name = hu,
+        showlegend = TRUE
       )
   }
   
@@ -218,7 +219,8 @@ for (site_year in unique(paste(residuals.df$Site, residuals.df$year))) {
       type = "scatter",
       mode = "lines",
       line = list(width = 2, color = "black"),
-      name = "Thalweg Depth"
+      name = "Thalweg Depth",
+        showlegend = TRUE
     ) %>%
     add_trace(
       data = site_year_data,
@@ -227,7 +229,8 @@ for (site_year in unique(paste(residuals.df$Site, residuals.df$year))) {
       type = "scatter",
       mode = "markers",
       marker = list(size = 5, color = "blue"),
-      name = "Residual Surface"
+      name = "Residual Surface",
+        showlegend = TRUE
     )
   
   # Set the layout with titles
@@ -317,10 +320,12 @@ final_plot <- subplot(
     annotations = NULL,  # Remove the overall figure title
     showlegend = FALSE,
     legend = list(
-      title = NULL,  # Remove legend title
       orientation = "v",
+      title = list(text = "<b>Habitat Units</b>"),
       x = 1.05
-    )
+    ),
+    xaxis = list(title = "Distance (m)"),
+    yaxis = list(title = "Depth (m)")
   )
 
 # Display the final plot with adjustments
@@ -340,10 +345,54 @@ Certain features of the above figure may be of particular interest. For example,
 
 For this question, we consider any residual pool that is 50% or more assigned as BEA or DEB as being a beaver or debris pool in its entirety. Similarly, if the field assignment of BEA or DEB corresponds with a residual pool outlet (i.e., debris or a beaver dam was observed holding back water) then the entire residual pool will be assigned as a beaver/debris dam pool, even if the full extent was not recognised as such in the field. This approach is to account for differences between code-assigned residual pools and pools as recognised in the field, such as where a sequence of beaver pool, debris pool, scour pool is observed, but in fact the whole section appears to be controlled/backwatered by the downstream beaver dam, based on the residual surface.
 
+Before we generate metrics relating to beaver or debris pools, we need to consider how to treat the first pool. We will repeat the approach used in 'Longitudinal Survey 3 Residual Pools'.
+
+### Omit First Pool Option
+
+Your decision again will depend on the particular circumstances for your site and study, but we again stress the need for careful consideration. If you are able to repeat your surveys each year at a reasonably consistent location, then including data from the first pool (with the artificial pool outlet we generated ) is generally preferable to omitting potentially meaningful data. This is especially relevant here, given that debris jams and beaver dams might often be the very reason that you were unable to begin your survey at a pool outlet.
+
+Enter your decision to omit or include the first pool in the chunk of code below. Note that you must follow Steps 1 and 2 in the below code if you have only one year of data, or if your decision regarding Pool 1 was consistent across all sites and years that will be analysed today. If your decision for that first pool was not consistent across all sites and years, complete Steps 1 and 3 in the below code. 
+
+Our default, if you alter nothing, will be to keep the first pool in the analyses.
+
+```{r omit first pool}
+# --- User input required: Pool 1 inclusion or omission
+
+# ---------- Step 1: change the below 'TRUE' to 'FALSE' if your decision about Pool 1 is not consistent across all sites and years analysed in this session
+consistent_pool1_rule <- TRUE   # If this remains 'TRUE', go to Step 2. 
+                                # If you enter 'FALSE' go to Step 3.
+
+if (consistent_pool1_rule) {
+  global_pool1_omit <- FALSE    # ---------- Step 2: set to TRUE to exclude Pool 1 from analyses (across all sites and years where present),
+                                # or set to FALSE to include Pool 1 across the board.
+  
+  pool1_settings <- residuals.df %>%
+    distinct(Site, year) %>%
+    mutate(Pool1Omit = global_pool1_omit)
+  
+} else {
+  # ---------- Step 3: List all site-year combinations in the data to be analysed, as well as whether Pool 1 should be omitted (TRUE) or included (FALSE).
+  
+  pool1_settings <- tibble::tribble(
+    ~Site,               ~year,  ~Pool1Omit,
+    "Fish Trap Channel", 2025,  TRUE,
+    "Fish Trap Channel", 2026,  TRUE,
+    "Fish Free Channel", 2025,  FALSE,
+    "Fish Free Channel", 2026,  FALSE
+    # add more rows for extra Site-years, and don’t forget the comma for the penultimate line
+  )
+}
+
+pool1_settings<-pool1_settings %>%
+  mutate(year = as.character(year))
+
+```
+
+
 Below we display and export summary data for each year at each reach, and the individual pool data with their status as beaver/debris dam. With our Hatchery Channel example data there is one debris dam residual pool identified in 2024 but none in 2025. With reference to the above figure, this is explained by the woody debris being at the location of a pool outlet in 2024, but the same magnitude of debris is located mid-pool in 2025 and is therefore considered not to be functionally creating the pool.
 
 ```{r proportion BEA/DEB pools, echo = FALSE, results='asis'}
-calculate_beaver_and_debris_pools_by_site_year <- function(df) {
+calculate_beaver_and_debris_pools_by_site_year <- function(df, pool1_settings) {
   # Remove rows with NA pool_ids and negative distances
   df <- df[df$distance >= 0 & !is.na(df$pool_id), ]
   
@@ -359,6 +408,21 @@ calculate_beaver_and_debris_pools_by_site_year <- function(df) {
   for (site_year in names(site_year_groups)) {
     # Extract the data for the current site-year
     site_year_data <- site_year_groups[[site_year]]
+    
+      # get Pool1Omit flag for this site-year
+    pool1omit_flag <- pool1_settings %>%
+      dplyr::filter(Site == site, year == year) %>%
+      dplyr::pull(Pool1Omit)
+    pool1omit_flag <- if (length(pool1omit_flag) == 0) FALSE else pool1omit_flag[1]
+    
+    # Drop pool 1 if flagged
+    if (isTRUE(pool1omit_flag)) {
+      site_year_data <- site_year_data[site_year_data$pool_id != 1, ]
+    }
+    if (nrow(site_year_data) == 0) {
+      message(sprintf("All pools omitted for Site '%s' Year %s", site, year))
+      next
+    }
     
     # Identify outlet debris conditions
     site_year_data$outlet_debris <- with(site_year_data, ifelse(
@@ -401,33 +465,41 @@ calculate_beaver_and_debris_pools_by_site_year <- function(df) {
       has_debris_outlet <- any(pool_data$outlet_debris == "Y" & pool_data$HU_Primary == "DEB")
       
       # Assign pool type based on habitat dominance or outlet debris condition
-      pool_type <- if (is_beaver_pool || has_beaver_outlet) {
-        "Beaver Pool"
-      } else if (is_debris_pool || has_debris_outlet) {
-        "Debris-Dam Pool"
-      } else {
-        "Other"
-      }
+     if (pool_length <= 0) {
+     pool_type <- "puddle"
+    } else if (is_beaver_pool || has_beaver_outlet) {
+    pool_type <- "Beaver Pool"
+    } else if (is_debris_pool || has_debris_outlet) {
+    pool_type <- "Debris-Dam Pool"
+    } else {
+     pool_type <- "Other"
+}
       
       # Calculate sagittal area for the pool
-      sagittal_area <- 0
-      for (i in 1:(nrow(pool_data) - 1)) {
-        depth <- pool_data$residual_depth[i]
-        if (is.na(depth) || depth <= 0) next
-        spacing <- abs(pool_data$distance[i + 1] - pool_data$distance[i])
-        sagittal_area <- sagittal_area + (depth * spacing)
+sagittal_area <- 0
+if ("residual_depth" %in% names(pool_data)) {
+  for (i in seq_len(max(0, nrow(pool_data) - 1))) {
+    depth <- pool_data$residual_depth[i]
+    if (is.null(depth) || is.na(depth) || depth <= 0) next
+    spacing <- abs(pool_data$distance[i + 1] - pool_data$distance[i])
+    sagittal_area <- sagittal_area + (depth * spacing)
+  }
+  
+  # Handle last row contribution
+  if (nrow(pool_data) > 0) {
+    last_row <- pool_data[nrow(pool_data), ]
+    if (!is.null(last_row$residual_depth) &&
+        !is.na(last_row$residual_depth) &&
+        last_row$residual_depth > 0) {
+      next_pool_start <- site_year_data[site_year_data$distance > last_row$distance & !is.na(site_year_data$pool_id), ]
+      if (nrow(next_pool_start) > 0) {
+        next_distance <- next_pool_start$distance[1]
+        spacing <- abs(next_distance - last_row$distance)
+        sagittal_area <- sagittal_area + (last_row$residual_depth * spacing)
       }
-      
-      # Handle last row contribution to sagittal area
-      last_row <- pool_data[nrow(pool_data), ]
-      if (!is.na(last_row$residual_depth) && last_row$residual_depth > 0) {
-        next_pool_start <- site_year_data[site_year_data$distance > last_row$distance & !is.na(site_year_data$pool_id), ]
-        if (nrow(next_pool_start) > 0) {
-          next_distance <- next_pool_start$distance[1]
-          spacing <- abs(next_distance - last_row$distance)
-          sagittal_area <- sagittal_area + (last_row$residual_depth * spacing)
-        }
-      }
+    }
+  }
+}
       
       # Store results for the pool
       pool_summary[[as.character(pool_id)]] <- list(
@@ -475,7 +547,7 @@ calculate_beaver_and_debris_pools_by_site_year <- function(df) {
 }
 
 # Apply the function
-result <- calculate_beaver_and_debris_pools_by_site_year(residuals.df)
+result <- calculate_beaver_and_debris_pools_by_site_year(residuals.df, pool1_settings)
 
 # Convert list of proportions into a data frame
 proportions_df <- do.call(rbind, lapply(names(result), function(site_year) {
@@ -596,6 +668,8 @@ export_plot(dam_plot, "Beaver Debris Dam Pools.pdf")
 
 Now let's take a look at diversity metrics for the habitat units assigned in the field. When we refer to pools here, we are referring only to habitat assigned in the field, and not the residual pools that we identified in our previous script. Remember that while residual pools are an estimate of habitat when flow approaches zero, the pools assigned in the field represent habitat as observable at that particular flow condition.
 
+Because we are now using field-assigned habitat units, the below metrics are not influenced by your decision above to omit/keep the first pool in the survey. These habitat unit metrics are calculated based on the full length of your survey.
+
 Before reading into the below metrics, it is worth considering that people classifying Habitat Units may vary in experience and/or confidence, and could (for example) 'default' to a particular type of pool that they are most familiar when they are unsure. This could mean that identical habitats can differ in certain metrics based on the observer. We feel that pool percent and pool-to-riffle ratio are robust to these concerns, that scoured and dammed pool percentages are fairly robust in the majority of cases, but that the Shannon diversity index is prone to underestimates of diversity if observers are not confident assigning any of the appropriate habitat unit categories. As such, exercise extra caution with interpreting changes in Shannon indices where observers have changed over time or between reaches (or even if significant time has passed for the same observer).
 
 ```{r habitat unit diversity, echo = FALSE}
@@ -629,7 +703,7 @@ calculate_diversity_and_area_metrics_by_site_year <- function(df) {
     dammed_area_df <- sub_df[sub_df$HU_Primary %in% dammed_hu, ]
     total_dammed_area <- sum(dammed_area_df$bar_width)
     
-    # Total area (distance range in the dataframe)
+    # Total area (distance range in the dataframe) 
     total_area <- max(sub_df$distance) - min(sub_df$distance)
     
     # Pool to Riffle Ratio
@@ -686,7 +760,6 @@ calculate_diversity_and_area_metrics_by_site_year <- function(df) {
   return(results_df)
 }
 
-# Example of running the function on your dataframe
 result <- calculate_diversity_and_area_metrics_by_site_year(residuals.df)
 
 # display summary table in R 

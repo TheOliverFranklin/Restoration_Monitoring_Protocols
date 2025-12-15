@@ -685,23 +685,29 @@ The proportional length of pools in the reach also has demonstrated positive rel
 
 We will now generate and export to your output folder some summary statistics, including the aforementioned mean max residual depth and length-in-residual-pool, for your data. But before we look at summary statistics at the pool level, we need to know if you want to include the pool at the very start of your survey.
 
+### Omit First Pool Option
+
 The first pool in the sequence is potentially not meaningful for your study and/or may not be repeatable, for example if you were unable to start your survey at a genuine pool outlet / riffle crest.  In our code we generated an artificial pool outlet so that the initial pool metrics can be calculated anyway, but we recommend only including the artificially-truncated first pool in the following analyses if you are confident you can repeat future surveys at the same consistent location. Note that if you decide to omit the first pool in the following code, it will be omitted from all summary statistics and inferential tests going forward (including for fines & aquatic veg).
 
-Enter your decision to omit or include the first pool in the chunk of code below. Note that you must follow Steps 1 and 2 in the below code if you have only one year of data, or if your decision regarding Pool 1 was consistent across all sites and years that will be analysed today. If your decision for that first pool was not consistent across all sites and years, complete Steps 1 and 3 in the below code. Our default, if you alter nothing, will be to keep the first pool in the analyses.
+If you *are* considering omitting the first pool, take another look at the figure we generated above. In some cases (e.g., a beaver 'involved' with your restoration) you may have started your survey in a pool that backwaters quite far upstream. Omitting this pool might mean losing a considerable amount of data, which complicates comparisons across years that do not feature such pools. So before making the decision to omit any data, consider how this might impact your data and your interpretations, and (probably most important) whether this first pool is actually an important component of the variation that occurs at your sites, or whether it can be considered an artefact that could be omitted. We suggest that, if you are able to repeat your surveys each year at a reasonably consistent location, then including data from the first pool (with the artificial pool outlet generated here) is preferable.
+
+Enter your decision to omit or include the first pool in the chunk of code below. Note that you must follow Steps 1 and 2 in the below code if you have only one year of data, or if your decision regarding Pool 1 was consistent across all sites and years that will be analysed today. If your decision for that first pool was not consistent across all sites and years, complete Steps 1 and 3 in the below code. 
+
+Our default, if you alter nothing, will be to keep the first pool in the analyses. Note that, if you omit the first pool in a given site and year, the statistic 'proportion length in residual pool' will be calculated based on a total reach length that also omits the first pool.
 
 
 ```{r omit first pool}
 # --- User input required: Pool 1 inclusion or omission
 
 # ---------- Step 1: change the below 'TRUE' to 'FALSE' if your decision about Pool 1 is not consistent across all sites and years analysed in this session
-consistent_pool1_rule <- FALSE   # If this remains 'TRUE', go to Step 2. 
+consistent_pool1_rule <- TRUE   # If this remains 'TRUE', go to Step 2. 
                                 # If you enter 'FALSE' go to Step 3.
 
 if (consistent_pool1_rule) {
   global_pool1_omit <- FALSE    # ---------- Step 2: set to TRUE to exclude Pool 1 from analyses (across all sites and years where present),
                                 # or set to FALSE to include Pool 1 across the board.
   
-  pool1_settings <- df %>%
+  pool1_settings <- residuals.df %>%
     distinct(Site, year) %>%
     mutate(Pool1Omit = global_pool1_omit)
   
@@ -725,10 +731,6 @@ pool1_settings<-pool1_settings %>%
 #  left_join(pool1_settings, by = c("Site", "year")) %>%
 #  filter(!(Pool1Omit & pool_id == 1))   # drop pool 1 rows where Pool1Omit == TRUE
 ```
-
-# up to here
-
-
 
 
 ```{r residual pool summary stats, echo = FALSE}
@@ -784,7 +786,17 @@ calculate_subset_summary <- function(pool_summary_df, residuals.df, pool1_settin
     # Calculate the proportion of reach length in residual pools for this group
     total_pool_length <- sum(group$pool_length, na.rm = TRUE)
     total_reach_length <- max(group_residuals.df$distance, na.rm = TRUE)
-    proportion_length_in_residual_pool <- total_pool_length / total_reach_length
+    
+    # check Pool1Omit for this site-year (this would reduce the total reach length denominator to also exclude the first pool)
+pool1omit <- unique(group$Pool1Omit)
+if (isTRUE(pool1omit)) {
+  # find max distance for pool_id == 1 in this site-year
+  pool1_max <- max(group_residuals.df$distance[group_residuals.df$pool_id == 1], na.rm = TRUE)
+  # subtract it from total reach length
+  total_reach_length <- total_reach_length - pool1_max
+}
+
+proportion_length_in_residual_pool <- total_pool_length / total_reach_length
     
     # Create a summary table for this group
     subset_summary <- data.frame(
@@ -869,8 +881,8 @@ Enter your before and after years in the below code, you may have more than one 
 
 ```{r define before after}
 # Define "Before" and "After" years
-before_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
-after_years <- c(2026) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
+before_years <- c(2024) #add more years inside brackets if needed, e.g. 'c(2024, 2025, 2026)'
+after_years <- c(2025) #add more years inside brackets if needed, e.g. 'c(2027, 2029, 2036)'
 ```
 
 ```{r categorise by before after, echo = FALSE}
@@ -1310,7 +1322,6 @@ datatable(
 # Export table
 export_table(as.data.frame(pool_volumes_result), "Residual Pool Volume Estimates.csv")
 ```
-# up to here. adding the pool1omit logic. Takes time. need to also look through scripts 4 and 5 in case it causes issue
 
 The above table lists the volume estimates for each of the 'meaningful' subset of residual pools, and this table is also exported to your output folder. Next we will display and export a table with some key summary statistics for the reach: Total volume of residual pools, and the mean and standard deviation residual volume of pools.
 
@@ -1391,6 +1402,7 @@ datatable(
 # Export table
 export_table(as.data.frame(volume_summary_result), "Reach Residual Pool Volume Metrics by Site and Year.csv")
 ```
+
 
 ## Inferential Tests - Volume
 
@@ -1542,7 +1554,7 @@ The longitudinal survey included presence/absence observations of fine sediment 
 Note that, while the previous metrics in this script use the 'custom depth' threshold to subset what are considered 'meaningful' pools, we recommend considering fine sediment relative to the full contingent of residual pools that the code has identified. Our rationale is that the fines metrics relate more closely to the mechanisms that can be responsible for making pools 'meaningful' (or not) in terms of fish habitat availability. If we were to look at the proportion of fines only in 'meaningful' (deep enough) pools, we might miss pools that are closer to being 'not pools' (i.e., recently filling-in or scouring of sediment). Of course, when pools are fully infilled with sediment they will not be detected as pools at all, but the ability to recognise when a pool is filling in (or scouring out) may be an important indicator of restoration success, or a trigger for adaptive management actions.
 
 ```{r fines, echo = FALSE}
-calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_threshold = NULL, use_sd_threshold = FALSE, Pool1Omit = FALSE) {
+calculate_fines_proportion <- function(pool_data, residuals.df, pool1_settings, custom_depth_threshold = NULL, use_sd_threshold = FALSE) {
   # Ensure the residuals dataframe has 'Site' and 'year' columns for grouping
   if (!all(c("Site", "year") %in% colnames(residuals.df))) {
     stop("residuals.df must contain 'Site' and 'year' columns.")
@@ -1567,11 +1579,16 @@ calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_thr
       next
     }
     
+    # get Pool1Omit flag for this site-year
+    pool1omit_flag <- pool1_settings %>%
+      dplyr::filter(Site == site, year == year) %>%
+      dplyr::pull(Pool1Omit)
+    pool1omit_flag <- if (length(pool1omit_flag) == 0) FALSE else pool1omit_flag[1]
+    
     # If Pool1Omit = TRUE, drop pool_id == 1
-    if (isTRUE(Pool1Omit)) {
+    if (isTRUE(pool1omit_flag)) {
       subset_residuals <- subset_residuals[subset_residuals$pool_id != 1, ]
     }
-    
     # Ensure the dataframe is sorted by distance within each pool
     subset_residuals <- subset_residuals[order(subset_residuals$pool_id, subset_residuals$distance), ]
     
@@ -1692,6 +1709,8 @@ calculate_fines_proportion <- function(pool_data, residuals.df, custom_depth_thr
   
   return(combined_fines_proportion_df)
 }
+
+## This code does not generate anything yet - it is just a function that will be applied after the custom depth user specificaiton
 ```
 
 However, should it be of greater interest for your project, we have included in the code below the ability to select a subset of pools. Consistent with the previous custom depth threshold, you can add a specified depth in metres, or enter 'NULL' to select only pools with a maximum residual depth greater than the standard deviation of the residual depths for the entire sampled reach. Our default is 0 (no subsetting).
@@ -1706,9 +1725,9 @@ custom_depth <- 0  # Replace with your desired threshold in metres, or set to NU
 fines_proportion_result <- calculate_fines_proportion(
   pool_data = pool_summary_result,   # 
   residuals.df = residuals.df,       # 
+  pool1_settings = pool1_settings, 
   custom_depth_threshold = custom_depth,  # Use custom threshold for filtering (will overwrite NULL / SD case)
-  use_sd_threshold = TRUE,            # TRUE = SD is used when there is no custom_depth specified. 
-Pool1Omit = Pool1Omit
+  use_sd_threshold = TRUE            # TRUE = SD is used when there is no custom_depth specified. 
   )
                                                                                                                                                            
 # Split the results by Site
@@ -1789,13 +1808,6 @@ We will generate a frequency plot of the fine proportion data, fit the Beta regr
 ```{r fines data evaluating, echo = FALSE}
 #### add the before/after categories and pool1omit value from previous input
 fines_proportion_result <- fines_proportion_result %>%
- { 
-    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
-      filter(., pool_id != 1)
-    } else {
-      .
-    }
-  } %>%
   mutate(Time_Category = case_when(
     year %in% before_years ~ "Before",
     year %in% after_years ~ "After",
@@ -1872,6 +1884,7 @@ Proportional data can be less intuitive to interpret, and using an unfamiliar in
 
 # Aquatic Vegetation in Pools
 
+
 In the field, you may have also estimated the proportion of the wetted width that was occupied by aquatic vegetation. During data wrangling we added three new data columns to facilitate analyses of these aquatic vegetation observations: subveg (submerged vegetation), floatveg (floating vegetation), and emergveg (emergent vegetation). We will use these variables to estimate the length and plan area of each residual pool that would be occupied by aquatic vegetation when flows approach zero. These can be useful metrics for tracking habitat quality and mechanisms of habitat change, however plan area estimates come with a caveat:
 
 <span style="font-size: smaller; margin-left: 20px; display: block;">
@@ -1883,7 +1896,7 @@ Aside from the above, in some cases it can also be difficult to assign proportio
 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿 🌿🌿🌿🌿🌿
 
 ```{r aquatic veg in pools, echo = FALSE}
-calculate_veg_proportion <- function(residuals.df, veg_column, custom_depth = NULL, Pool1Omit = FALSE) {  # Validate that the vegetation column exists in the residuals dataframe
+calculate_veg_proportion <- function(residuals.df, veg_column, pool1_settings, custom_depth = NULL) {  # Validate that the vegetation column exists in the residuals dataframe
   if (!veg_column %in% colnames(residuals.df)) {
     stop(paste("The column", veg_column, "is not present in the residuals dataframe."))
   }
@@ -1906,15 +1919,20 @@ for (i in 1:nrow(unique_sites_years)) {
     next
   }
   
-      # Drop pool 1 if Pool1Omit is TRUE
-    if (isTRUE(Pool1Omit)) {
+ # Look up Pool1Omit flag for this site-year
+    pool1omit_flag <- pool1_settings %>%
+      dplyr::filter(Site == site, year == year) %>%
+      dplyr::pull(Pool1Omit)
+    pool1omit_flag <- if (length(pool1omit_flag) == 0) FALSE else pool1omit_flag[1]
+    
+    # Drop pool 1 if flagged
+    if (isTRUE(pool1omit_flag)) {
       subset_residuals <- subset_residuals[subset_residuals$pool_id != 1, ]
     }
-  
-      if (nrow(subset_residuals) == 0) {
+    if (nrow(subset_residuals) == 0) {
       message(paste("All pools omitted for Site:", site, "Year:", year))
       next
-      }
+    }
   
   # Determine the depth threshold (custom or SD)
   depth_threshold <- if (is.null(custom_depth)) {
@@ -1927,11 +1945,13 @@ for (i in 1:nrow(unique_sites_years)) {
   #cat("Depth threshold for Site:", site, "Year:", year, "is:", depth_threshold, "\n")
   
     # Filter pools based on depth threshold
-    valid_pools <- subset_residuals %>%
+    valid_pools <- suppressWarnings( # suppress warnings as I give up making them coherent - they only appear when no veg in site-year)
+    subset_residuals %>%
       group_by(pool_id) %>%
       filter(max(residual_depth, na.rm = TRUE) > depth_threshold) %>%
       pull(pool_id) %>%
       unique()
+    )
     
     # Subset residuals for valid pools
     subset_residuals <- subset_residuals[subset_residuals$pool_id %in% valid_pools, ]
@@ -2018,6 +2038,8 @@ for (pool_id in unique_pool_ids) {
   
   return(veg_proportion_df)
 }
+
+# again, nothing exported or displayed... just a funky little function
 ```
 The tables generated and exported by the code below will show the proportional length of residual pools in which aquatic vegetation was present (regardless of quantity/width), in the same way that we used the fines data. The tables also show the plan area of residual pools that featured aquatic vegetation, based on your estimates of the proportion of wetted width occupied by vegetation at each interval, integrated along the length of each pool.
 
@@ -2030,9 +2052,9 @@ custom_depth <- 0  # Replace with your desired threshold in metres, or set to NU
 
 ```{r Aquatic veg tables, echo = FALSE, message=FALSE}
 # Call the function with the custom depth threshold
-subveg_result <- calculate_veg_proportion(residuals.df, veg_column = "subveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
-emergveg_result <- calculate_veg_proportion(residuals.df, veg_column = "emergveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
-floatveg_result <- calculate_veg_proportion(residuals.df, veg_column = "floatveg", custom_depth = custom_depth, Pool1Omit = Pool1Omit)
+subveg_result <- calculate_veg_proportion(residuals.df, veg_column = "subveg", pool1_settings = pool1_settings, custom_depth = custom_depth)
+emergveg_result <- calculate_veg_proportion(residuals.df, veg_column = "emergveg", pool1_settings = pool1_settings,custom_depth = custom_depth)
+floatveg_result <- calculate_veg_proportion(residuals.df, veg_column = "floatveg", pool1_settings = pool1_settings,custom_depth = custom_depth)
 
 # Extract "Total" rows for each table
 subveg_total <- subveg_result[subveg_result$pool_id == "Total", ]
@@ -2052,6 +2074,7 @@ kable(floatveg_total, caption = "Reachwide Floating Vegetation for Each Site-Yea
 
 ## Inferential Tests - Aquatic Veg
 
+
 Just like with the fines data, we are dealing with data that are bounded by 0 and 1 (for both proportions of length and for area, across each type of vegetation). The non-transformed data would be expected to violate the assumptions of ANOVA, so we omit the initial diagnostic tests. We will again apply Beta regressions.
 
 Below we display the Beta regression model summaries for all vegetation categories (where present), both length and area proportions. We omit the diagnostic plots from the display, but when you run the code for your data, you should examine the plots.
@@ -2061,13 +2084,6 @@ Below we display the Beta regression model summaries for all vegetation categori
 run_beta_regression <- function(data, response_var, dataset_name, summary_list) {
   # Create the Time_Category and omit pool 1 if applied above
   data <- data %>%
-     { 
-    if (exists("Pool1Omit") && isTRUE(Pool1Omit)) {
-      filter(., pool_id != 1)
-    } else {
-      .
-    }
-  } %>%
   mutate(Time_Category = case_when(
     year %in% before_years ~ "Before",
     year %in% after_years ~ "After",
