@@ -220,7 +220,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Deadwood Creek/Riparian/to_combine"
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Riparian/to_combine"
 ```
 
 ```{r combine csv input files, echo=FALSE}
@@ -270,7 +270,7 @@ Once you have considered the above, please amend the code below with your prefer
 
 ``` {r user considerations, echo = TRUE}
 #
-combine_left_right <- FALSE   # replace with FALSE to analyse banks separately
+combine_left_right <- TRUE   # replace with FALSE to analyse banks separately
 sites_to_exclude <- c()  # leave empty: c() ; omit named sites. eg. c("Hatchery Channel", "Fish Creek")
 transects_to_exclude <- c() # leave empty: c() ; omit named transects. eg. c("1", "2") ...or c("1_Right", "2_Right", "1_Left") etc if L/R banks are to be treated separately
 combine_height_classes <- FALSE   # set TRUE to merge all height classes into one
