@@ -245,11 +245,11 @@ Note that you must follow Steps 1 and 2 in the below code if you have only one y
 consistent_direction <- TRUE   # If this remains 'TRUE', specify the direction at Step 2. If you enter 'FALSE' go to Step 3.
 
 if (consistent_direction) {
-  global_direction <- "downstream"   # ----------  Step 2: specify "upstream" or "downstream"  (include quotation marks). Then there are no more user inputs for you in this section.
+  global_whereisT1 <- "downstream"   # ----------  Step 2: specify whether transect 1 is "upstream" or "downstream" (include quotation marks). Then there are no more user inputs for you in this section.
   
   survey_direction <- df %>%
     distinct(Site, year) %>%
-    mutate(Transect1Location = global_direction)
+    mutate(Transect1Location = global_whereisT1)
   
 } else {
   # ----------  Step 3: List all site-year combinations in the data to be analysed in this session, as well as the location of Transect 1 as "upstream" or "downstream"  (include quotation marks)
