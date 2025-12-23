@@ -220,7 +220,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Riparian/to_combine"
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Nathan Creek/Riparian/to_combine"
 ```
 
 ```{r combine csv input files, echo=FALSE}
@@ -260,7 +260,7 @@ Take a look through the dataframe and ensure there are no errors and to explore 
 
 There are several important considerations before we analyse your data, and you should decide and document these decisions now:
 
-- If you surveyed both banks at any of your transects, __do you consider the left and right bank as two sides of the same transect, or are they distinct samples?__ If they are two sides of the same transect, metrics such as cover would be calculated by summing data from both sides together. If they are distinct samples, left and right will each have their own metrics. Consider your hypotheses (e.g., do you expect change on one side in particular) and consider the implications for your data. If you consider the left and right banks as distinct transects, we will provide reach summary statistics for left and right banks separately. Ensure that you have established _a priori_ rationale justifying whether or not you treated banks differently.
+- If you surveyed both banks at any of your transects, __do you consider the left and right bank as two sides of the same transect, or are they distinct samples?__ If they are two sides of the same transect, metrics such as cover would be calculated by summing data from both sides together. If they are distinct samples, left and right will each have their own metrics. Consider your hypotheses (e.g., do you expect change on one side in particular) and consider the implications for your data. If you consider the left and right banks as distinct transects, we will provide reach summary statistics for left and right banks separately. Ensure that you have established _a priori_ rationale justifying whether or not you treated banks differently. Note that, if you were unable to survey similar transect lengths on each bank, it is usually advisable to analyse them separately.
 
 - Your data may include vegetation associated with multiple channels (different 'Site' names), or you may wish to exclude certain transects for the analyses. For example, the area expected to be impacted by restoration may have changed since you collected baseline data because the restoration plan changed. Consider whether all transects are representative of your reach, and whether you may have crossed over into a distinct habitat type. __Make note of any transects that you may need to exclude__, and ensure this is followed in the coming years.
 
@@ -332,7 +332,11 @@ df$occurrence.magnitude <- pmax(df$End_location, 0) - pmax(df$Start_location, 0)
 
 Most surveys will use a standardised transect length (the distance the transect extends away from the channel) that is consistent across all transects. However, there may be circumstances in which this is not possible and it is also biologically/geomorphologically meaningful to have data with somewhat variable transect lengths. For example, where you survey a narrow flood bench with a variable distance between the channel (the start of the transect) and a steep bank that hosts a distinct change in vegetative community (the end of the transect). 
 
-The code below can be used to define the consistent transect length that you surveyed (enter value in metres at user_defined_transect_length, and ensure transect_length_from_data is FALSE) or, if you enter TRUE at transect_length_from_data, each transect length will be defined by the greatest measurement recorded at that transect.
+The code below can be used to define the consistent transect length that you surveyed:
+
+- If you surveyed both banks with a consistent transect length, enter the length of the transect per side (e.g., if you surveyed 15 m on each bank, enter 15, not 30). Enter this value at user_defined_transect_length, and ensure transect_length_from_data is FALSE.
+- If your transects were not consistent length across your full site, enter TRUE at transect_length_from_data. 
+- If you are analysing both left and right banks together, the Transect_length variable generated below will refer to the sum of both banks.
 
 ```{r specify transect length}
 # You can specify to obtain transect lengths from the data (can vary by transect), or use a predefined standard length
@@ -342,13 +346,34 @@ user_defined_transect_length <- 30       # Only used if transect_length_from_dat
 ``` {r transect length from data, echo=FALSE}
 df <- df %>%
   group_by(Transect_ID) %>%
-  mutate(Transect_length = if (transect_length_from_data) {
-                             max(End_location, na.rm = TRUE)
-                           } else {
-                             user_defined_transect_length
-                           }) %>%
-  ungroup()
+  mutate(
+    # find transect length (per row)
+    Raw_length = if (transect_length_from_data) {
+      End_location
+    } else {
+      user_defined_transect_length
+    }
+  ) %>%
+  summarise(
+    # add left and right transect lengths per Transect, if combined
+    Left_length  = max(Raw_length[grepl("^(L|Left)$", Bank, ignore.case = TRUE)],  na.rm = TRUE),
+    Right_length = max(Raw_length[grepl("^(R|Right)$", Bank, ignore.case = TRUE)], na.rm = TRUE),
+    Combined_length = if (combine_left_right) {
+      sum(c(Left_length, Right_length), na.rm = TRUE)
+    } else {
+      max(Raw_length, na.rm = TRUE)
+    }
+  ) %>%
+  ungroup() %>%
+  right_join(df, by = "Transect_ID") %>%
+  mutate(
+    Transect_length = Combined_length
+  ) %>%
+  select(-Combined_length, -Left_length, -Right_length)
+
+if (combine_left_right) { message("Banks combined: transect length is sum length of both banks") }
 ```
+
 
 # Export Data
 
