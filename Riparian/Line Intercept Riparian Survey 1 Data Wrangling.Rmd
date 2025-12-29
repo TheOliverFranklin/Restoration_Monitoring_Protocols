@@ -356,14 +356,18 @@ df <- df %>%
   ) %>%
   summarise(
     # add left and right transect lengths per Transect, if combined
-    Left_length  = max(Raw_length[grepl("^(L|Left)$", Bank, ignore.case = TRUE)],  na.rm = TRUE),
-    Right_length = max(Raw_length[grepl("^(R|Right)$", Bank, ignore.case = TRUE)], na.rm = TRUE),
-    Combined_length = if (combine_left_right) {
-      sum(c(Left_length, Right_length), na.rm = TRUE)
-    } else {
-      max(Raw_length, na.rm = TRUE)
-    }
-  ) %>%
+Left_length = ifelse(
+    any(grepl("^(L|Left)$", Bank, ignore.case = TRUE)),max(Raw_length[grepl("^(L|Left)$", Bank, ignore.case = TRUE)], na.rm = TRUE),
+    0),
+  Right_length = ifelse(
+    any(grepl("^(R|Right)$", Bank, ignore.case = TRUE)),max(Raw_length[grepl("^(R|Right)$", Bank, ignore.case = TRUE)], na.rm = TRUE),
+    0),
+  Combined_length = if (combine_left_right) {
+    Left_length + Right_length
+  } else {
+    max(Raw_length, na.rm = TRUE)
+  }
+) %>%
   ungroup() %>%
   right_join(df, by = "Transect_ID") %>%
   mutate(
@@ -373,6 +377,7 @@ df <- df %>%
 
 if (combine_left_right) { message("Banks combined: transect length is sum length of both banks") }
 ```
+
 
 
 # Export Data
