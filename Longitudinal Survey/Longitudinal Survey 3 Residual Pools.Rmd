@@ -282,7 +282,22 @@ calculate_residual_depths <- function(df) {
         break
       }
     }
+
+     # fix for residual surface becoming NA at certain LDMs
+    # This enables the LDM loop to continue projecting from a valid surface.
+    seed_end_index <- suppressWarnings(max(which(!is.na(residuals.df$residual_surface))))
+    if (is.finite(seed_end_index)) {
+      last_residual_surface <- residuals.df$residual_surface[seed_end_index]
+      last_residual_index   <- seed_end_index
+    } else if (!is.na(downstream_depth)) {
+      # Fallback: if Stage‑A wrote nothing but the first row has a valid depth, seed from there.
+      last_residual_surface <- downstream_depth
+      last_residual_index   <- downstream_index
+      residuals.df$residual_surface[downstream_index] <- downstream_depth
+      residuals.df$residual_depth[downstream_index]   <- 0
+    }
   }
+ 
 
   # Iterate through the rest of the rows to identify local depth minima
   for (b in 2:(nrow(residuals.df) - 1)) {
@@ -312,8 +327,17 @@ calculate_residual_depths <- function(df) {
         } else {
           next
         }
+
+        # Guard the comparison to avoid 'missing value where TRUE/FALSE needed'
+        if (!is.na(downstream_depth) && !is.na(projected_residual_surface) &&
+            downstream_depth <= projected_residual_surface) {
+          last_residual_surface <- downstream_depth
+          last_residual_index   <- b
+        } else {
+          next
+        }
       }
-      
+
       for (e in (last_residual_index + 1):nrow(residuals.df)) {
         spacing_current <- residuals.df$distance[e] - residuals.df$distance[last_residual_index]
         residual_surface <- last_residual_surface + slope_factor * spacing_current
@@ -363,6 +387,7 @@ residuals.df <- df %>%
   do(calculate_residual_depths(.)) %>%
   ungroup()
 ```
+
 
 Below we generate a quick visual of the depths and residual surfaces that were projected by the code. Take a look to ensure it matches your understanding of residual pools and look for potential errors (the figure is interactive, so zoom in if you have several plots). Try to identify some local depth minima that are within a pool (if present in your data), and compare these to the local depth minima that act as pool outlets - the shallower features at which residual surfaces begin. Remember that the residual surface slopes down in these figures as you progress upstream (right in the plots), which is to compensate for the fact that the true thalweg surface slopes down as you progress downstream.
 

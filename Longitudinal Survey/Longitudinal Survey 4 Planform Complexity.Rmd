@@ -262,12 +262,19 @@ all_sites_years <- df %>%
 
 # 2. Process the nodes and calculate the metrics for those that have nodes
 nodes_df <- df %>%
-  filter(!is.na(Nodes) & Nodes != "-" & Nodes != "0") %>%
+  mutate(Nodes = as.character(Nodes)) %>%        # ensure character
+  mutate(Nodes = trimws(Nodes)) %>%              # remove surrounding whitespace
+  filter(
+    !is.na(Nodes),
+    Nodes != "",
+    Nodes != "-",
+    Nodes != "0"
+  ) %>%
   mutate(
-    # Extract node characteristics
-    Type = substr(Nodes, 3, 3),  # Extract type (C or B)
-    WetDry = substr(Nodes, 4, 4)  # Extract wet/dry (W or D)
+    Type   = substr(Nodes, 3, 3),
+    WetDry = substr(Nodes, 4, 4)
   )
+
 
 # 3. Group by Site and Year to calculate metrics for each combination
 node_metrics <- nodes_df %>%
@@ -321,6 +328,7 @@ node_table
 # Export table
 export_table(as.data.frame(node_metrics_full), "Node Metrics by Site and Year.csv")
 ```
+
 
 The table above provides some metrics that may be of interest if the restoration objectives include an alteration to the branching density or pattern of the stream (e.g., see Stefankiv et al 2019). Number and density of nodes may represent floodplain habitat area or aquatic complexity, and would be greater in anastomosing channels than more channelised reaches.
 
