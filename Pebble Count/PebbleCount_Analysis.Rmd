@@ -299,6 +299,7 @@ Optional: If you would like to plot the locations of each of your sites on a map
 # Load in Site location information, amend the path in the code below to link to your .csv of the location data
 site_file <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Pebble Count/Sites.csv"
 ```
+
 ```{r check if file exists, echo=FALSE, message=FALSE, warning=FALSE}
 if (file.exists(site_file)) {
   site_data <- read.csv(site_file, header = TRUE)
@@ -306,6 +307,7 @@ if (file.exists(site_file)) {
   site_data <- NULL  # Assign NULL if file does not exist
 }
 ```
+
 ```{r show study location,echo=FALSE, message=FALSE, warning=FALSE}
 
 if (!is.null(site_data)) {
@@ -761,7 +763,7 @@ PC_data_long <- PC_data %>%
   pivot_longer(cols = starts_with("B_Axis_T"), #converts wide format into long format 
                names_to = "Measurement", 
                values_to = "size")%>% 
-  select(Site, Year, size)%>%
+  dplyr::select(Site, Year, size)%>%
   drop_na(size) %>% # Remove NA values
  
    # assign numeric values to sand and fines
@@ -800,7 +802,7 @@ datatable(
       `Cumulative proportion` = probs,
       `Count` = counts
     ) %>%
-    select(Site, Year, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
+    dplyr::select(Site, Year, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
   rownames = FALSE,
   options = list(
     scrollX = TRUE,  # Enable horizontal scrolling
@@ -941,7 +943,7 @@ Now we will take a look at plots to compare the cumulative frequency distributio
 #  Extract D50 values (50th percentile) from my.Dvalues
 D50_values <- my.Dvalues %>%
  filter(percentile == 50) %>%
-  select(Site, Year, D50 = estimate)  # Rename column for clarity
+  dplyr::select(Site, Year, D50 = estimate)  # Rename column for clarity
 
 
 GSD_plot <-ggplot(results_df, aes(x = size, y = probs, color = factor(Year))) +
@@ -1181,7 +1183,7 @@ rownames(results_df) <- NULL
 #       `Cumulative proportion` = probs,
 #       `Count` = counts
 #     ) %>%
-#     select(Site, Time_Category, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
+#     dplyr::select(Site, Time_Category, `Size class / mm`, `Cumulative proportion`, `Count`),  # Reorder and rename only in display
 #   rownames = FALSE,
 #   options = list(
 #     scrollX = TRUE,  # Enable horizontal scrolling
