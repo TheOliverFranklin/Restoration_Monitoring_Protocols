@@ -305,7 +305,7 @@ node_metrics_full <- node_metrics_full %>%
   )
 
 node_metrics_full <- node_metrics_full %>%
-  select(-stream_length)
+  dplyr::select(-stream_length)
 
 # View the expanded node metrics for all sites and years
 node_table<-datatable(node_metrics_full, 
@@ -371,7 +371,7 @@ rci_results <- node_metrics_full %>%
 # Remove the stream_length column from the RCI results table
 rci_results_clean <- rci_results %>%
   filter(!is.na(Thalweg_Line_Length)) %>%  # Remove rows with NA Thalweg_Line_Length
-  select(-stream_length, -Straight_Line_Distance, -Thalweg_Line_Length)  # Exclude the stream_length column (incorrect if no nodes), and others to tidy
+  dplyr::select(-stream_length, -Straight_Line_Distance, -Thalweg_Line_Length)  # Exclude the stream_length column (incorrect if no nodes), and others to tidy
 
 # Display the cleaned RCI results
 RCI_table<-datatable(rci_results_clean, 

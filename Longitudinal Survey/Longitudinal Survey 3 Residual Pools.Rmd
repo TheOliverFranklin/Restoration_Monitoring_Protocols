@@ -684,7 +684,7 @@ custom_depth <- NULL
 pool_summary_result <- create_pool_summary_table(residuals.df, custom_depth_threshold = custom_depth)
 pool_summary_result$pool_id <- as.character(pool_summary_result$pool_id)
 pool_summary_result <- pool_summary_result %>%
-  select(Site, year, everything())  # Move Site and Year to the left
+  dplyr::select(Site, year, everything())  # Move Site and Year to the left
 datatable(
   pool_summary_result,
   caption = "Residual Pool Summary by Pool: Maximum Depth, Length, Sagittal Area",
@@ -850,7 +850,7 @@ subset_summary_result <- calculate_subset_summary(pool_summary_result, residuals
 
 # Display the result as a table
 subset_summary_result <- subset_summary_result %>%
-  select(Site, Year, everything())  # Move Site and Year to the left
+  dplyr::select(Site, Year, everything())  # Move Site and Year to the left
 datatable(
   subset_summary_result,
   caption = "Reach Summary Statistics for Pools by Site and Year",
@@ -864,6 +864,8 @@ datatable(
 
 # Export table
 export_table(as.data.frame(subset_summary_result), "Reach Summary Stats for Pools by Site and Year.csv")
+# also export residuals dataframe for later use
+export_table(as.data.frame(residuals.df),"Residuals_dataframe.csv") 
 ```
 
 These above statistics should be useful for tracking changes over time, or comparing reference / control reaches. Because they are all based on residual depths, they are flow-independent. 
@@ -1332,7 +1334,7 @@ pool_volumes_result <- calculate_pool_volumes_for_sites_years(residuals.df, pool
 
 # Display the result as a table
 pool_volumes_result <- pool_volumes_result %>%
-  select(Site, year, everything())  # Move Site and Year to the left
+  dplyr::select(Site, year, everything())  # Move Site and Year to the left
 datatable(
   pool_volumes_result,
   caption = "Pool Volumes by Site and Year",
@@ -1412,7 +1414,7 @@ volume_summary_result <- calculate_volume_summary_for_sites_years(pool_volumes_r
 
 # Display the result as a table
 volume_summary_result <- volume_summary_result %>%
-  select(Site, year, everything())  # Move Site and Year to the left
+  dplyr::select(Site, year, everything())  # Move Site and Year to the left
 datatable(
   volume_summary_result,
   caption = "Volume Summary Statistics for Subset of Pools by Site and Year",
@@ -1786,7 +1788,7 @@ for (site_name in names(site_split)) {
   
   # Move Site and year columns to the left and format the datatable
   sorted_site_data <- sorted_site_data %>%
-    select(Site, year, everything())  # Move Site and year to the left
+    dplyr::select(Site, year, everything())  # Move Site and year to the left
   
 # Remove row names from the data frame explicitly
   rownames(sorted_site_data) <- NULL

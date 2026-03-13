@@ -266,14 +266,14 @@ site_year_spacings <- list(
 ```{r distance variable calculation, echo = FALSE}
 # Ensure all Site-Year combinations have spacing specified
 unique_combinations <- df %>%
-  select(Site, year) %>%
+  dplyr::select(Site, year) %>%
   distinct()
 
 missing_combinations <- unique_combinations %>%
   rowwise() %>%
   mutate(missing = is.null(site_year_spacings[[Site]][[as.character(year)]])) %>%
   filter(missing) %>%
-  select(Site, year)
+  dplyr::select(Site, year)
 
 if (nrow(missing_combinations) > 0) {
   stop(paste(

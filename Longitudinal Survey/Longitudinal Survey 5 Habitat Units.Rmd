@@ -806,7 +806,7 @@ HUplots<-ggplot(plot_data_long, aes(x = factor(year), y = Value, color = Site, g
 ############# plot of pool type proportions 
 # Prepare data for the stacked bar plot
 plot_data_long_percent <- result %>%
-  select(Site, year, pool_percent, scourpool_percent, dammedpool_percent) %>%
+  dplyr::select(Site, year, pool_percent, scourpool_percent, dammedpool_percent) %>%
   pivot_longer(cols = c(pool_percent, scourpool_percent, dammedpool_percent),
                names_to = "Pool_Type", values_to = "Proportion") %>%
   mutate(Pool_Type_Label = case_when(
