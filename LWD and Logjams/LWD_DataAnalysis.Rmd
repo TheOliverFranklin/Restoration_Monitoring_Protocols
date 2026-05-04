@@ -174,7 +174,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
-data_dir <- "C:/Users/ZARGARPOURN/Documents/SAR Team/Monitoring Protocols/R Code/LWD"
+data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Black Creek/LWD/to_combine"
 ```
 
 ```{r combine csv input files, echo=FALSE}
@@ -454,7 +454,7 @@ LWD_table<-tags$div(
                             format = colFormat(digits = 2)),
     Avg_Length_m = colDef(name = "Mean Length (SD) / m",
                           format = colFormat(digits = 1)),
-    Avg_Volume = colDef(name = "Mean Volume (SD) / m",
+    Avg_Volume = colDef(name = "Mean Volume (SD) / m³",
                         format = colFormat(digits = 1)),
     Volume_Per_100m = colDef(name = "Volume / m³ per 100 m", 
                            format = colFormat(digits = 1)),
