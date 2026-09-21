@@ -161,6 +161,7 @@ Once you have checked your column names are correct, place your .csv file(s) in 
 ``` {r specify raw data folder}
 # Specify the directory containing the raw data files
 data_dir <- "C:/Users/franklino/Documents/Restoration_Monitoring_Protocols/data_raw/Pebble Count/to_combine"
+#test
 ```
 
 ```{r combine csv input files, echo=FALSE, warning=FALSE}
